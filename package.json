@@ -1,0 +1,19 @@
+{
+  "name": "redevice",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Verifiable repair histories for refurbished electronics on Sui",
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @redevice/web",
+    "build": "npm run build --workspace @redevice/web",
+    "typecheck": "npm run typecheck --workspace @redevice/web",
+    "format:check": "npm run format:check --workspace @redevice/web"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "npm@11.6.2"
+}

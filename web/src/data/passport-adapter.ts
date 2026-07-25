@@ -44,6 +44,38 @@ export type PublicDevicePassport = {
   repairHistory: RepairRecord[];
 };
 
+export type RepairerAuthorization =
+  | {
+      status: "disconnected";
+      label: "Wallet not connected";
+      explanation: string;
+    }
+  | {
+      status: "unchecked";
+      label: "Authorization check pending";
+      explanation: string;
+    }
+  | {
+      status: "authorized";
+      label: "Authorized repairer";
+      explanation: string;
+    }
+  | {
+      status: "unauthorized";
+      label: "Wallet lacks permission";
+      explanation: string;
+    };
+
+export type RepairWorkspaceConfig = {
+  selectedDeviceId: string;
+  repairTypes: string[];
+  lifecycleConditions: LifecycleCondition[];
+  defaultRepairType: string;
+  defaultNextCondition: LifecycleCondition;
+  privacyWarning: string;
+  integrationNotice: string;
+};
+
 const samplePassport: PublicDevicePassport = {
   id: "RDP-2026-0148",
   manufacturer: "Apple",
@@ -111,8 +143,51 @@ const samplePassport: PublicDevicePassport = {
   ],
 };
 
+const sampleRepairWorkspace: RepairWorkspaceConfig = {
+  selectedDeviceId: samplePassport.id,
+  repairTypes: [
+    "Battery replacement",
+    "Display replacement",
+    "Keyboard replacement",
+    "Port repair",
+    "Initial inspection",
+    "Other service",
+  ],
+  lifecycleConditions: ["Inspected", "Refurbished", "In service", "Retired"],
+  defaultRepairType: "Battery replacement",
+  defaultNextCondition: "Refurbished",
+  privacyWarning:
+    "Evidence will be public. Never upload full serial numbers, invoices, customer names, addresses, private documents, recovery phrases, or private keys.",
+  integrationNotice:
+    "This form prepares the frontend only. It cannot upload to Walrus, request a wallet signature, or submit a Sui transaction until the contract integration is connected.",
+};
+
 export const passportAdapter = {
   getPublicPassport(): PublicDevicePassport {
     return samplePassport;
+  },
+};
+
+export const repairWorkspaceAdapter = {
+  getConfig(): RepairWorkspaceConfig {
+    return sampleRepairWorkspace;
+  },
+
+  getAuthorization(walletAddress: string | null): RepairerAuthorization {
+    if (!walletAddress) {
+      return {
+        status: "disconnected",
+        label: "Wallet not connected",
+        explanation:
+          "Connect a Sui testnet wallet before checking repair permission.",
+      };
+    }
+
+    return {
+      status: "unchecked",
+      label: "Authorization check pending",
+      explanation:
+        "The wallet is connected, but the published Move package is not integrated yet, so repair permission has not been checked onchain.",
+    };
   },
 };

@@ -104,3 +104,26 @@ Files assisted:
 Human verification: Automated formatting, type checking and production build
 checks were run before commit. Visual verification on the owner's Mac remains
 pending after transfer.
+
+## Repairer workspace
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved the remaining
+repairer workflow. The workspace uses the real dApp Kit wallet connection and
+shows the connected address, but it does not invent an authorization result or
+fake a Walrus upload, signature request, or Sui transaction before integration.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/data/passport-adapter.ts`
+- `web/src/index.css`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. Wallet and transaction integration must be tested
+with the published Move package by both an authorized and unauthorized wallet.

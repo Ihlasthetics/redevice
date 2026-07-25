@@ -18,6 +18,7 @@ import {
   passportAdapter,
   type RepairRecordLink,
 } from "./data/passport-adapter";
+import RepairWorkspace from "./components/RepairWorkspace";
 
 function RecordLink({
   icon,
@@ -85,10 +86,18 @@ function App() {
             </span>
           </a>
 
-          <p className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-xs font-semibold text-muted sm:text-sm">
-            <Eye aria-hidden="true" className="size-4 text-brand" />
-            No wallet needed
-          </p>
+          <div className="flex items-center gap-2">
+            <a
+              className="hidden min-h-11 items-center rounded-full px-3.5 text-sm font-semibold text-muted transition-colors hover:bg-surface hover:text-ink sm:inline-flex"
+              href="#repair-workspace"
+            >
+              Repairer workspace
+            </a>
+            <p className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-xs font-semibold text-muted sm:text-sm">
+              <Eye aria-hidden="true" className="size-4 text-brand" />
+              No wallet needed
+            </p>
+          </div>
         </div>
       </header>
 
@@ -393,6 +402,8 @@ function App() {
             </ol>
           </div>
         </section>
+
+        <RepairWorkspace />
 
         <footer className="border-t border-line pt-6 text-xs leading-5 text-muted">
           This sample passport uses mock data for interface review. No record on

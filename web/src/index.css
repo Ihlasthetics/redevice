@@ -44,6 +44,20 @@ a {
   color: var(--color-ink);
 }
 
+.wallet-button mysten-dapp-kit-connect-button {
+  --cursor-button: pointer;
+  --font-weight-semibold: 600;
+}
+
+.wallet-button mysten-dapp-kit-connect-button::part(trigger) {
+  min-height: 44px;
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  background: var(--color-ink);
+  color: var(--color-canvas);
+  box-shadow: none;
+}
+
 :focus-visible {
   outline: 3px solid var(--color-brand);
   outline-offset: 3px;

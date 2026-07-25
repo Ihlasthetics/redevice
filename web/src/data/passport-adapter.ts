@@ -76,6 +76,23 @@ export type RepairWorkspaceConfig = {
   integrationNotice: string;
 };
 
+export type TransactionStatus =
+  | "ready"
+  | "uploading"
+  | "awaiting-signature"
+  | "submitting"
+  | "confirmed"
+  | "rejected";
+
+export type TransactionStatusDefinition = {
+  id: TransactionStatus;
+  shortLabel: string;
+  label: string;
+  description: string;
+  nextStep: string;
+  tone: "neutral" | "pending" | "success" | "danger";
+};
+
 const samplePassport: PublicDevicePassport = {
   id: "RDP-2026-0148",
   manufacturer: "Apple",
@@ -162,6 +179,69 @@ const sampleRepairWorkspace: RepairWorkspaceConfig = {
     "This form prepares the frontend only. It cannot upload to Walrus, request a wallet signature, or submit a Sui transaction until the contract integration is connected.",
 };
 
+const sampleTransactionStates: TransactionStatusDefinition[] = [
+  {
+    id: "ready",
+    shortLabel: "Ready",
+    label: "Ready to submit",
+    description:
+      "The service draft is complete and the connected wallet is authorized.",
+    nextStep:
+      "The real integration will start the public evidence upload after the repairer confirms.",
+    tone: "neutral",
+  },
+  {
+    id: "uploading",
+    shortLabel: "Uploading",
+    label: "Uploading public evidence",
+    description:
+      "The selected non-sensitive file is being stored on Walrus before the repair record is submitted.",
+    nextStep:
+      "Keep this page open. A wallet signature will be requested after the upload succeeds.",
+    tone: "pending",
+  },
+  {
+    id: "awaiting-signature",
+    shortLabel: "Signature",
+    label: "Awaiting wallet signature",
+    description:
+      "The repair record is prepared and waiting for the connected wallet to approve it.",
+    nextStep:
+      "Review the device, repair details, lifecycle change, and network in the wallet.",
+    tone: "pending",
+  },
+  {
+    id: "submitting",
+    shortLabel: "Submitting",
+    label: "Submitting to Sui testnet",
+    description:
+      "The signed repair record has been sent to Sui and is waiting for confirmation.",
+    nextStep:
+      "Do not submit again. The passport will refresh after the transaction is confirmed.",
+    tone: "pending",
+  },
+  {
+    id: "confirmed",
+    shortLabel: "Confirmed",
+    label: "Repair record confirmed",
+    description:
+      "Sui confirmed the authorized repairer's update and the passport can now show the new record.",
+    nextStep:
+      "A real confirmation will include a Sui Explorer link and the public Walrus evidence link.",
+    tone: "success",
+  },
+  {
+    id: "rejected",
+    shortLabel: "Rejected",
+    label: "Wallet lacks permission",
+    description:
+      "The Move contract rejected this update because the connected wallet is not an authorized repairer.",
+    nextStep:
+      "No repair record was added. Connect an authorized wallet or ask the prototype administrator to grant permission.",
+    tone: "danger",
+  },
+];
+
 export const passportAdapter = {
   getPublicPassport(): PublicDevicePassport {
     return samplePassport;
@@ -189,5 +269,21 @@ export const repairWorkspaceAdapter = {
       explanation:
         "The wallet is connected, but the published Move package is not integrated yet, so repair permission has not been checked onchain.",
     };
+  },
+};
+
+export const transactionStatusAdapter = {
+  getAll(): TransactionStatusDefinition[] {
+    return sampleTransactionStates;
+  },
+
+  getById(status: TransactionStatus): TransactionStatusDefinition {
+    const state = sampleTransactionStates.find((item) => item.id === status);
+
+    if (!state) {
+      throw new Error(`Unknown transaction status: ${status}`);
+    }
+
+    return state;
   },
 };

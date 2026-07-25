@@ -16,6 +16,7 @@ import {
   passportAdapter,
   repairWorkspaceAdapter,
 } from "../data/passport-adapter";
+import TransactionStatusPreview from "./TransactionStatusPreview";
 
 function formatAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
@@ -290,6 +291,8 @@ function RepairWorkspace() {
               </p>
             </div>
           </div>
+
+          <TransactionStatusPreview />
 
           <button
             className="mt-5 inline-flex min-h-12 w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-ink px-5 text-sm font-semibold text-canvas opacity-55 sm:w-auto"

@@ -127,3 +127,28 @@ Files assisted:
 Human verification: Automated formatting, type checking and production build
 checks were run before commit. Wallet and transaction integration must be tested
 with the published Move package by both an authorized and unauthorized wallet.
+
+## Repair transaction states
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved all required
+transaction states in the repairer workspace. A clearly labeled interface
+preview covers ready, uploading, awaiting signature, submitting, confirmed and
+rejected states without simulating blockchain behavior. The rejected result
+explicitly attributes the failure to Move authorization instead of a generic
+application error.
+
+Files assisted:
+
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/components/TransactionStatusPreview.tsx`
+- `web/src/data/passport-adapter.ts`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. The frontend owner still needs to review the
+states visually after transfer; real status transitions require Sui and Walrus
+integration tests.

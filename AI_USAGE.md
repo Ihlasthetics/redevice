@@ -42,3 +42,24 @@ Human verification:
 
 Prompts that materially direct implementation belong in `specs/prompts/`.
 Never include secrets or wallet recovery information in prompts or commits.
+
+## Public passport layout
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved a first milestone
+limited to the wallet-free public passport summary and explicitly deferred the
+repair timeline, evidence links, repair workspace and blockchain integration.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/index.css`
+- `web/src/data/passport-adapter.ts`
+
+Human verification: The frontend owner reviewed and approved the milestone
+scope and authorized the commit and push. Automated formatting, type checking
+and production build checks were run before commit. Visual verification on the
+owner's Mac remains pending after pulling the branch.

@@ -42,3 +42,142 @@ Human verification:
 
 Prompts that materially direct implementation belong in `specs/prompts/`.
 Never include secrets or wallet recovery information in prompts or commits.
+
+## Public passport layout
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved a first milestone
+limited to the wallet-free public passport summary and explicitly deferred the
+repair timeline, evidence links, repair workspace and blockchain integration.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/index.css`
+- `web/src/data/passport-adapter.ts`
+
+Human verification: The frontend owner reviewed and approved the milestone
+scope and authorized the commit and push. Automated formatting, type checking
+and production build checks were run before commit. The owner then pulled the
+branch, ran the app locally and visually verified the public passport layout.
+
+## Repair history timeline
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved a second milestone
+limited to the repair history timeline and its evidence and Explorer resource
+states. Real Walrus and Sui URLs remain deferred to testnet integration, so the
+sample records do not claim to be onchain.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/data/passport-adapter.ts`
+- `AI_USAGE.md`
+
+Human verification: The frontend owner approved the milestone scope. Automated
+formatting, type checking and production build checks passed. The owner then
+pulled the branch, ran the app locally and visually verified the repair history
+timeline.
+
+## Limited-history warning
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved completing all
+remaining frontend requirements without separate milestone approval gates
+because of the hackathon deadline. The warning explicitly states that repairs
+before the passport coverage date are unknown.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. Visual verification on the owner's Mac remains
+pending after transfer.
+
+## Repairer workspace
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved the remaining
+repairer workflow. The workspace uses the real dApp Kit wallet connection and
+shows the connected address, but it does not invent an authorization result or
+fake a Walrus upload, signature request, or Sui transaction before integration.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/data/passport-adapter.ts`
+- `web/src/index.css`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. Wallet and transaction integration must be tested
+with the published Move package by both an authorized and unauthorized wallet.
+
+## Repair transaction states
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved all required
+transaction states in the repairer workspace. A clearly labeled interface
+preview covers ready, uploading, awaiting signature, submitting, confirmed and
+rejected states without simulating blockchain behavior. The rejected result
+explicitly attributes the failure to Move authorization instead of a generic
+application error.
+
+Files assisted:
+
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/components/TransactionStatusPreview.tsx`
+- `web/src/data/passport-adapter.ts`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. The frontend owner still needs to review the
+states visually after transfer; real status transitions require Sui and Walrus
+integration tests.
+
+## Frontend completion review
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner requested completion of all
+remaining frontend requirements under the hackathon deadline. The final review
+kept all interactive controls at least 44 pixels tall, added a visible
+keyboard-focus treatment to the custom file picker, preserved reduced-motion
+behavior and checked the layout structure for 375-pixel mobile screens.
+
+Files assisted:
+
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/components/TransactionStatusPreview.tsx`
+- `web/src/index.css`
+- `web/index.html`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. Final mobile, wallet and end-to-end transaction
+verification remains required on the frontend owner's Mac after transfer and
+after the Move/Walrus integration is available.
+
+The final runtime smoke check also replaced the inherited Sui starter page
+title and favicon reference with ReDevice metadata.

@@ -171,9 +171,13 @@ Files assisted:
 - `web/src/components/RepairWorkspace.tsx`
 - `web/src/components/TransactionStatusPreview.tsx`
 - `web/src/index.css`
+- `web/index.html`
 - `AI_USAGE.md`
 
 Human verification: Automated formatting, type checking and production build
 checks were run before commit. Final mobile, wallet and end-to-end transaction
 verification remains required on the frontend owner's Mac after transfer and
 after the Move/Walrus integration is available.
+
+The final runtime smoke check also replaced the inherited Sui starter page
+title and favicon reference with ReDevice metadata.

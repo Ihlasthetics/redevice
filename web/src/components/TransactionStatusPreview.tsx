@@ -115,6 +115,7 @@ function TransactionStatusPreview() {
       <div
         className={clsx("mt-4 rounded-2xl border p-4 sm:p-5", styles.shell)}
         aria-live="polite"
+        role="status"
       >
         <div className="flex items-start gap-3">
           <span

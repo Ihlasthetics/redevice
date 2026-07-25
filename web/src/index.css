@@ -58,6 +58,15 @@ a {
   box-shadow: none;
 }
 
+.file-picker:focus-within {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 3px;
+}
+
+.file-picker input:focus-visible {
+  outline: none;
+}
+
 :focus-visible {
   outline: 3px solid var(--color-brand);
   outline-offset: 3px;

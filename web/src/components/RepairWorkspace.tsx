@@ -254,7 +254,7 @@ function RepairWorkspace() {
                   Select a non-sensitive image or PDF for later Walrus upload.
                 </p>
               </div>
-              <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-line bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:border-brand hover:text-brand">
+              <label className="file-picker inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-line bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:border-brand hover:text-brand">
                 <FileUp aria-hidden="true" className="size-4" />
                 Choose file
                 <input

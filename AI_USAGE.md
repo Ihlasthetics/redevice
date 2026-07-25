@@ -82,8 +82,9 @@ Files assisted:
 - `AI_USAGE.md`
 
 Human verification: The frontend owner approved the milestone scope. Automated
-formatting, type checking and production build checks passed. Visual verification
-on the owner's Mac remains pending after commit and pull.
+formatting, type checking and production build checks passed. The owner then
+pulled the branch, ran the app locally and visually verified the repair history
+timeline.
 
 ## Limited-history warning
 
@@ -152,3 +153,27 @@ Human verification: Automated formatting, type checking and production build
 checks were run before commit. The frontend owner still needs to review the
 states visually after transfer; real status transitions require Sui and Walrus
 integration tests.
+
+## Frontend completion review
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner requested completion of all
+remaining frontend requirements under the hackathon deadline. The final review
+kept all interactive controls at least 44 pixels tall, added a visible
+keyboard-focus treatment to the custom file picker, preserved reduced-motion
+behavior and checked the layout structure for 375-pixel mobile screens.
+
+Files assisted:
+
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/components/TransactionStatusPreview.tsx`
+- `web/src/index.css`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. Final mobile, wallet and end-to-end transaction
+verification remains required on the frontend owner's Mac after transfer and
+after the Move/Walrus integration is available.

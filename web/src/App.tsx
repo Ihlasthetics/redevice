@@ -1,14 +1,56 @@
 import {
+  ArrowRight,
+  BatteryMedium,
   CalendarDays,
   Check,
   CircleCheck,
   Eye,
+  FileCheck2,
+  History,
   Laptop,
+  Link2Off,
   ScanLine,
   ShieldCheck,
   Wrench,
 } from "lucide-react";
-import { passportAdapter } from "./data/passport-adapter";
+import {
+  passportAdapter,
+  type RepairRecordLink,
+} from "./data/passport-adapter";
+
+function RecordLink({
+  icon,
+  resource,
+}: {
+  icon: React.ReactNode;
+  resource: RepairRecordLink;
+}) {
+  if (!resource.url) {
+    return (
+      <span
+        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-dashed border-line bg-canvas px-3.5 text-xs font-semibold text-muted"
+        aria-label={`${resource.label} not available in sample data`}
+      >
+        <Link2Off aria-hidden="true" className="size-4" />
+        {resource.label}
+        <span className="font-normal">· sample unavailable</span>
+      </span>
+    );
+  }
+
+  return (
+    <a
+      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-3.5 text-xs font-semibold text-ink transition-colors hover:border-brand hover:text-brand"
+      href={resource.url}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {icon}
+      {resource.label}
+      <span className="sr-only">(opens in a new tab)</span>
+    </a>
+  );
+}
 
 function App() {
   const passport = passportAdapter.getPublicPassport();
@@ -191,6 +233,134 @@ function App() {
               </div>
             </div>
           </article>
+        </section>
+
+        <section
+          aria-labelledby="repair-history-title"
+          className="border-t border-line py-10 sm:py-14"
+        >
+          <div className="grid gap-7 lg:grid-cols-[0.72fr_1.28fr] lg:gap-12">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
+                Verified service records
+              </p>
+              <h2
+                id="repair-history-title"
+                className="mt-3 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl"
+              >
+                Repair history
+              </h2>
+              <p className="mt-4 max-w-md text-sm leading-6 text-muted sm:text-base sm:leading-7">
+                Each record shows what an authorized repairer attested to. A
+                record does not prove that the physical work occurred.
+              </p>
+
+              <div className="mt-6 flex items-start gap-3 rounded-2xl border border-line bg-surface p-4">
+                <History
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0 text-brand"
+                />
+                <p className="text-xs leading-5 text-muted">
+                  This sample timeline is for interface review. Evidence and
+                  Explorer links remain unavailable until real testnet records
+                  are connected.
+                </p>
+              </div>
+            </div>
+
+            <ol className="space-y-5">
+              {passport.repairHistory.map((record, index) => (
+                <li
+                  key={record.id}
+                  className="relative rounded-[1.5rem] border border-line bg-surface p-5 shadow-[0_24px_60px_-50px_rgba(21,31,28,0.5)] sm:p-7"
+                >
+                  <div className="flex flex-col gap-4 border-b border-line pb-5 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success-soft text-success">
+                        <Wrench aria-hidden="true" className="size-4.5" />
+                      </span>
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">
+                          Record {passport.repairHistory.length - index}
+                        </p>
+                        <h3 className="mt-1 text-xl font-semibold tracking-[-0.02em]">
+                          {record.repairType}
+                        </h3>
+                      </div>
+                    </div>
+
+                    <time
+                      className="inline-flex min-h-11 items-center gap-2 self-start rounded-full bg-canvas px-3.5 text-xs font-semibold text-muted"
+                      dateTime={record.serviceDate.isoDate}
+                    >
+                      <CalendarDays aria-hidden="true" className="size-4" />
+                      {record.serviceDate.displayDate}
+                    </time>
+                  </div>
+
+                  <p className="mt-5 text-sm leading-6 text-ink/80">
+                    {record.summary}
+                  </p>
+
+                  <dl className="mt-5 grid gap-4 rounded-2xl bg-canvas p-4 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+                        Attested by
+                      </dt>
+                      <dd className="mt-1.5 text-sm font-semibold">
+                        {record.repairer}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+                        Condition
+                      </dt>
+                      <dd className="mt-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold">
+                        <span>{record.conditionChange.previous}</span>
+                        <ArrowRight
+                          aria-hidden="true"
+                          className="size-4 text-brand"
+                        />
+                        <span>{record.conditionChange.next}</span>
+                      </dd>
+                    </div>
+
+                    {record.batteryHealth !== undefined && (
+                      <div className="sm:col-span-2">
+                        <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+                          Battery health after service
+                        </dt>
+                        <dd className="mt-1.5 flex items-center gap-2 text-sm font-semibold">
+                          <BatteryMedium
+                            aria-hidden="true"
+                            className="size-5 text-success"
+                          />
+                          {record.batteryHealth}%
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+
+                  <div
+                    className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
+                    aria-label={`Resources for ${record.repairType}`}
+                  >
+                    <RecordLink
+                      icon={
+                        <FileCheck2 aria-hidden="true" className="size-4" />
+                      }
+                      resource={record.evidence}
+                    />
+                    <RecordLink
+                      icon={<ScanLine aria-hidden="true" className="size-4" />}
+                      resource={record.transaction}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
         </section>
 
         <footer className="border-t border-line pt-6 text-xs leading-5 text-muted">

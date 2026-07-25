@@ -61,5 +61,26 @@ Files assisted:
 
 Human verification: The frontend owner reviewed and approved the milestone
 scope and authorized the commit and push. Automated formatting, type checking
-and production build checks were run before commit. Visual verification on the
-owner's Mac remains pending after pulling the branch.
+and production build checks were run before commit. The owner then pulled the
+branch, ran the app locally and visually verified the public passport layout.
+
+## Repair history timeline
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved a second milestone
+limited to the repair history timeline and its evidence and Explorer resource
+states. Real Walrus and Sui URLs remain deferred to testnet integration, so the
+sample records do not claim to be onchain.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/data/passport-adapter.ts`
+- `AI_USAGE.md`
+
+Human verification: The frontend owner approved the milestone scope. Automated
+formatting, type checking and production build checks passed. Visual verification
+on the owner's Mac remains pending after commit and pull.

@@ -84,3 +84,23 @@ Files assisted:
 Human verification: The frontend owner approved the milestone scope. Automated
 formatting, type checking and production build checks passed. Visual verification
 on the owner's Mac remains pending after commit and pull.
+
+## Limited-history warning
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner approved completing all
+remaining frontend requirements without separate milestone approval gates
+because of the hackathon deadline. The warning explicitly states that repairs
+before the passport coverage date are unknown.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking and production build
+checks were run before commit. Visual verification on the owner's Mac remains
+pending after transfer.

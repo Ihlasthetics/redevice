@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowRight,
   BatteryMedium,
   CalendarDays,
@@ -234,6 +235,36 @@ function App() {
             </div>
           </article>
         </section>
+
+        <aside
+          aria-labelledby="limited-history-title"
+          className="mb-2 rounded-[1.5rem] border border-amber-700/25 bg-amber-50 p-5 text-amber-950 sm:p-6"
+        >
+          <div className="flex items-start gap-4">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800">
+              <AlertTriangle aria-hidden="true" className="size-5" />
+            </span>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-800">
+                Limited history
+              </p>
+              <h2
+                id="limited-history-title"
+                className="mt-1.5 text-lg font-semibold tracking-[-0.015em]"
+              >
+                Earlier service history is unknown
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-950/75">
+                Verified coverage begins on{" "}
+                <time dateTime={passport.coverageStart.isoDate}>
+                  {passport.coverageStart.displayDate}
+                </time>
+                . Repairs or changes before this date are not included in this
+                passport and should not be assumed to be verified.
+              </p>
+            </div>
+          </div>
+        </aside>
 
         <section
           aria-labelledby="repair-history-title"

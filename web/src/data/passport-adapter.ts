@@ -11,6 +11,18 @@ export type RepairRecordLink = {
   url: string | null;
 };
 
+export type RepairerRecordDetails = {
+  workOrderReference: string;
+  laborMinutes: number;
+  diagnostics: string[];
+  partsUsed: {
+    name: string;
+    reference: string;
+    quantity: number;
+  }[];
+  technicianNotes: string;
+};
+
 export type RepairRecord = {
   id: string;
   serviceDate: {
@@ -27,6 +39,7 @@ export type RepairRecord = {
   batteryHealth?: number;
   evidence: RepairRecordLink;
   transaction: RepairRecordLink;
+  repairerDetails?: RepairerRecordDetails;
 };
 
 export type PublicDevicePassport = {
@@ -93,6 +106,22 @@ export type TransactionStatusDefinition = {
   tone: "neutral" | "pending" | "success" | "danger";
 };
 
+export type PassportQrResolution =
+  | {
+      status: "matched";
+      deviceId: string;
+      passport: PublicDevicePassport;
+    }
+  | {
+      status: "invalid";
+      message: string;
+    }
+  | {
+      status: "not-found";
+      deviceId: string;
+      message: string;
+    };
+
 const samplePassport: PublicDevicePassport = {
   id: "RDP-2026-0148",
   manufacturer: "Apple",
@@ -133,6 +162,23 @@ const samplePassport: PublicDevicePassport = {
         label: "Sui Explorer",
         url: null,
       },
+      repairerDetails: {
+        workOrderReference: "WO-2026-0725-018",
+        laborMinutes: 54,
+        diagnostics: [
+          "Battery capacity was below the service threshold.",
+          "Charging, thermal, and sleep checks passed after replacement.",
+        ],
+        partsUsed: [
+          {
+            name: "Replacement battery assembly",
+            reference: "BAT-MBP14-DEMO",
+            quantity: 1,
+          },
+        ],
+        technicianNotes:
+          "Battery was replaced, the enclosure was resealed, and post-service diagnostics completed without a reported fault.",
+      },
     },
     {
       id: "service-001",
@@ -155,6 +201,17 @@ const samplePassport: PublicDevicePassport = {
       transaction: {
         label: "Sui Explorer",
         url: null,
+      },
+      repairerDetails: {
+        workOrderReference: "WO-2026-0721-006",
+        laborMinutes: 35,
+        diagnostics: [
+          "Display, keyboard, ports, speakers, camera, and charging were checked.",
+          "Battery health required follow-up service.",
+        ],
+        partsUsed: [],
+        technicianNotes:
+          "Initial intake inspection completed. The device was held for a battery replacement before refurbishment.",
       },
     },
   ],
@@ -245,6 +302,100 @@ const sampleTransactionStates: TransactionStatusDefinition[] = [
 export const passportAdapter = {
   getPublicPassport(): PublicDevicePassport {
     return samplePassport;
+  },
+
+  getPublicPassportById(deviceId: string): PublicDevicePassport | undefined {
+    return deviceId.toUpperCase() === samplePassport.id
+      ? samplePassport
+      : undefined;
+  },
+};
+
+function readDeviceIdFromQrPayload(payload: string): string | null {
+  const value = payload.trim();
+
+  if (!value || value.length > 2_048) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (typeof parsed === "object" && parsed !== null) {
+      const record = parsed as Record<string, unknown>;
+      const candidate =
+        record.deviceId ?? record.passportId ?? record.device_id ?? record.id;
+
+      if (typeof candidate === "string") {
+        return candidate.trim();
+      }
+    }
+  } catch {
+    // A QR payload may be a URL or a plain device ID instead of JSON.
+  }
+
+  try {
+    const url = new URL(value);
+    const queryId =
+      url.searchParams.get("device") ??
+      url.searchParams.get("deviceId") ??
+      url.searchParams.get("passport");
+
+    if (queryId) {
+      return queryId.trim();
+    }
+
+    const pathId = url.pathname
+      .split("/")
+      .filter(Boolean)
+      .reverse()
+      .find((segment) => /^RDP-[A-Z0-9-]+$/i.test(segment));
+
+    if (pathId) {
+      return pathId;
+    }
+  } catch {
+    // The payload may be a ReDevice URI or a plain device ID.
+  }
+
+  const reDeviceUri = value.match(/^redevice:(?:passport:)?(.+)$/i);
+  const candidate = reDeviceUri?.[1] ?? value;
+
+  return /^RDP-[A-Z0-9-]{4,64}$/i.test(candidate) ? candidate.trim() : null;
+}
+
+export const qrPassportAdapter = {
+  getSamplePayload(): string {
+    return samplePassport.id;
+  },
+
+  resolve(payload: string): PassportQrResolution {
+    const deviceId = readDeviceIdFromQrPayload(payload);
+
+    if (!deviceId) {
+      return {
+        status: "invalid",
+        message:
+          "This QR code does not contain a supported ReDevice passport ID.",
+      };
+    }
+
+    const passport = passportAdapter.getPublicPassportById(deviceId);
+
+    if (!passport) {
+      return {
+        status: "not-found",
+        deviceId,
+        message:
+          "The QR code is valid, but this frontend sample does not have data for that device yet.",
+      };
+    }
+
+    return {
+      status: "matched",
+      deviceId: passport.id,
+      passport,
+    };
   },
 };
 

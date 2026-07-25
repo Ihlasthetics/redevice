@@ -14,8 +14,8 @@ AI-assisted on 25 July 2026:
 - initial Move package boundary
 - documentation, product specification and contribution workflow
 
-The frontend began with Mysten Labs'
-`@mysten/create-dapp@0.7.11` `react-e2e-counter` template. Reused setup:
+The frontend began with Mysten Labs' `@mysten/create-dapp@0.7.11`
+`react-e2e-counter` template. Reused setup:
 
 - React, TypeScript, Vite and Tailwind configuration
 - Mysten dApp Kit provider and wallet connection pattern
@@ -40,8 +40,8 @@ Files assisted:
 Human verification:
 ```
 
-Prompts that materially direct implementation belong in `specs/prompts/`.
-Never include secrets or wallet recovery information in prompts or commits.
+Prompts that materially direct implementation belong in `specs/prompts/`. Never
+include secrets or wallet recovery information in prompts or commits.
 
 ## Public passport layout
 
@@ -59,9 +59,9 @@ Files assisted:
 - `web/src/index.css`
 - `web/src/data/passport-adapter.ts`
 
-Human verification: The frontend owner reviewed and approved the milestone
-scope and authorized the commit and push. Automated formatting, type checking
-and production build checks were run before commit. The owner then pulled the
+Human verification: The frontend owner reviewed and approved the milestone scope
+and authorized the commit and push. Automated formatting, type checking and
+production build checks were run before commit. The owner then pulled the
 branch, ran the app locally and visually verified the public passport layout.
 
 ## Repair history timeline
@@ -179,5 +179,33 @@ checks were run before commit. Final mobile, wallet and end-to-end transaction
 verification remains required on the frontend owner's Mac after transfer and
 after the Move/Walrus integration is available.
 
-The final runtime smoke check also replaced the inherited Sui starter page
-title and favicon reference with ReDevice metadata.
+The final runtime smoke check also replaced the inherited Sui starter page title
+and favicon reference with ReDevice metadata.
+
+## QR passport scanner
+
+Date: 25 July 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The frontend owner requested camera-based QR
+scanning for public users and repairers. Public passport information must remain
+wallet-free, while extra repair details must be gated by the connected wallet's
+future repairer authorization. The backend is not ready, so the frontend must
+not invent an authorized role or expose repairer-only data inside the QR code.
+
+Files assisted:
+
+- `web/src/App.tsx`
+- `web/src/components/QrPassportScanner.tsx`
+- `web/src/components/RepairWorkspace.tsx`
+- `web/src/data/passport-adapter.ts`
+- `web/package.json`
+- `package-lock.json`
+- `specs/prompts/QR_SCANNER_PROMPT.md`
+- `AI_USAGE.md`
+
+Human verification: Automated formatting, type checking, production build and
+QR payload parsing checks passed before commit. Real mobile-camera behavior and
+authorized wallet data must be verified after transfer and after the
+contract/API integration is available.

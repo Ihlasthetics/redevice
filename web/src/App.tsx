@@ -14,10 +14,12 @@ import {
   ShieldCheck,
   Wrench,
 } from "lucide-react";
+import { useState } from "react";
 import {
   passportAdapter,
   type RepairRecordLink,
 } from "./data/passport-adapter";
+import QrPassportScanner from "./components/QrPassportScanner";
 import RepairWorkspace from "./components/RepairWorkspace";
 
 function RecordLink({
@@ -55,7 +57,9 @@ function RecordLink({
 }
 
 function App() {
-  const passport = passportAdapter.getPublicPassport();
+  const [passport, setPassport] = useState(() =>
+    passportAdapter.getPublicPassport(),
+  );
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -88,7 +92,13 @@ function App() {
 
           <div className="flex items-center gap-2">
             <a
-              className="hidden min-h-11 items-center rounded-full px-3.5 text-sm font-semibold text-muted transition-colors hover:bg-surface hover:text-ink sm:inline-flex"
+              className="hidden min-h-11 items-center rounded-full px-3.5 text-sm font-semibold text-muted transition-colors hover:bg-surface hover:text-ink md:inline-flex"
+              href="#qr-scanner"
+            >
+              Scan QR
+            </a>
+            <a
+              className="hidden min-h-11 items-center rounded-full px-3.5 text-sm font-semibold text-muted transition-colors hover:bg-surface hover:text-ink lg:inline-flex"
               href="#repair-workspace"
             >
               Repairer workspace
@@ -105,6 +115,8 @@ function App() {
         id="passport-content"
         className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14 lg:py-18"
       >
+        <QrPassportScanner onPassportResolved={setPassport} />
+
         <section aria-labelledby="passport-title">
           <div className="flex flex-col gap-8 border-b border-line pb-10 sm:pb-12 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
@@ -403,7 +415,7 @@ function App() {
           </div>
         </section>
 
-        <RepairWorkspace />
+        <RepairWorkspace passport={passport} />
 
         <footer className="border-t border-line pt-6 text-xs leading-5 text-muted">
           This sample passport uses mock data for interface review. No record on

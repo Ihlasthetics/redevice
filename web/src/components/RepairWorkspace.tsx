@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import {
-  passportAdapter,
   repairWorkspaceAdapter,
+  type PublicDevicePassport,
 } from "../data/passport-adapter";
 import TransactionStatusPreview from "./TransactionStatusPreview";
 
@@ -22,8 +22,11 @@ function formatAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-function RepairWorkspace() {
-  const passport = passportAdapter.getPublicPassport();
+type RepairWorkspaceProps = {
+  passport: PublicDevicePassport;
+};
+
+function RepairWorkspace({ passport }: RepairWorkspaceProps) {
   const workspace = repairWorkspaceAdapter.getConfig();
   const currentAccount = useCurrentAccount();
   const walletAddress = currentAccount?.address ?? null;

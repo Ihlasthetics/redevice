@@ -1,22 +1,23 @@
 // Copyright (c) 2026 ReDevice contributors
 // SPDX-License-Identifier: MIT
 
-/// ReDevice records authorized repair attestations for refurbished devices.
+/// ReDevice records unique device passports and authorized repair attestations.
 ///
-/// The contract proves who submitted a repair record and when it was
-/// attested. It does not prove that the physical repair itself happened.
+/// The registry prevents a normalized serial number from receiving more than
+/// one passport. Only a SHA-256 hash is stored; the raw serial stays off-chain.
 module redevice::redevice {
     use std::string::String;
     use sui::clock::{Self, Clock};
     use sui::event;
     use sui::object::{Self, ID, UID};
+    use sui::table::{Self, Table};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
 
     #[test_only]
     use sui::test_scenario as ts;
 
-    const PACKAGE_VERSION: u64 = 1;
+    const PACKAGE_VERSION: u64 = 2;
 
     const LIFECYCLE_USED: u8 = 0;
     const LIFECYCLE_REPAIRED: u8 = 1;
@@ -32,17 +33,22 @@ module redevice::redevice {
     const E_INVALID_BATTERY_HEALTH: u64 = 4;
     const E_INVALID_LIFECYCLE_STATUS: u64 = 5;
     const E_ALREADY_REVOKED: u64 = 6;
+    const E_DEVICE_ALREADY_REGISTERED: u64 = 7;
+    const E_INVALID_SERIAL_HASH: u64 = 8;
 
     /// Created once when the package is published and owned by the publisher.
-    /// Possession authorizes manufacturer and repairer-administration actions.
-    public struct AdminCap has key {
+    public struct AdminCap has key, store {
         id: UID,
     }
 
+    /// Shared index that enforces one passport per serial hash.
+    public struct DeviceRegistry has key {
+        id: UID,
+        serial_to_passport: Table<address, ID>,
+        registered_count: u64,
+    }
+
     /// A shared authorization object for one repairer wallet.
-    ///
-    /// It is shared intentionally: the demo can pass the same object from an
-    /// unauthorized wallet and show the Move sender check rejecting the call.
     public struct RepairerCap has key {
         id: UID,
         repairer: address,
@@ -63,12 +69,15 @@ module redevice::redevice {
         attested_at_ms: u64,
     }
 
-    /// Public onchain passport for one physical device.
+    /// Public on-chain passport for one physical device.
     public struct DevicePassport has key {
         id: UID,
         manufacturer: address,
+        device_name: String,
+        brand: String,
         model: String,
         masked_serial: String,
+        serial_hash: address,
         verification_level: u8,
         lifecycle_status: u8,
         history_started_at_ms: u64,
@@ -88,6 +97,7 @@ module redevice::redevice {
     public struct PassportCreated has copy, drop {
         passport_id: ID,
         manufacturer: address,
+        serial_hash: address,
     }
 
     public struct RepairAdded has copy, drop {
@@ -100,8 +110,14 @@ module redevice::redevice {
         let admin_cap = AdminCap {
             id: object::new(ctx),
         };
+        let registry = DeviceRegistry {
+            id: object::new(ctx),
+            serial_to_passport: table::new(ctx),
+            registered_count: 0,
+        };
 
         transfer::transfer(admin_cap, tx_context::sender(ctx));
+        transfer::share_object(registry);
     }
 
     /// Grants an address permission to attest repairs.
@@ -139,23 +155,35 @@ module redevice::redevice {
         });
     }
 
-    /// Creates and shares a passport that anyone can read.
+    /// Creates one passport for a serial hash and records it atomically.
     public entry fun create_passport(
         _admin: &AdminCap,
+        registry: &mut DeviceRegistry,
+        device_name: String,
+        brand: String,
         model: String,
         masked_serial: String,
+        serial_hash: address,
         lifecycle_status: u8,
         history_started_at_ms: u64,
         ctx: &mut TxContext,
     ) {
         assert!(is_valid_lifecycle_status(lifecycle_status), E_INVALID_LIFECYCLE_STATUS);
+        assert!(serial_hash != @0x0, E_INVALID_SERIAL_HASH);
+        assert!(
+            !table::contains(&registry.serial_to_passport, serial_hash),
+            E_DEVICE_ALREADY_REGISTERED,
+        );
 
         let manufacturer = tx_context::sender(ctx);
         let passport = DevicePassport {
             id: object::new(ctx),
             manufacturer,
+            device_name,
+            brand,
             model,
             masked_serial,
+            serial_hash,
             verification_level: VERIFICATION_MANUFACTURER,
             lifecycle_status,
             history_started_at_ms,
@@ -163,9 +191,17 @@ module redevice::redevice {
         };
         let passport_id = object::id(&passport);
 
+        table::add(
+            &mut registry.serial_to_passport,
+            serial_hash,
+            passport_id,
+        );
+        registry.registered_count = registry.registered_count + 1;
+
         event::emit(PassportCreated {
             passport_id,
             manufacturer,
+            serial_hash,
         });
         transfer::share_object(passport);
     }
@@ -226,8 +262,23 @@ module redevice::redevice {
         cap.active
     }
 
+    public fun registry_count(registry: &DeviceRegistry): u64 {
+        registry.registered_count
+    }
+
+    public fun is_serial_registered(
+        registry: &DeviceRegistry,
+        serial_hash: address,
+    ): bool {
+        table::contains(&registry.serial_to_passport, serial_hash)
+    }
+
     public fun passport_manufacturer(passport: &DevicePassport): address {
         passport.manufacturer
+    }
+
+    public fun passport_serial_hash(passport: &DevicePassport): address {
+        passport.serial_hash
     }
 
     public fun passport_lifecycle_status(passport: &DevicePassport): u8 {
@@ -262,39 +313,57 @@ module redevice::redevice {
     #[test_only]
     const UNAUTHORIZED_USER: address = @0xC;
 
+    #[test_only]
+    const DEMO_SERIAL_HASH: address = @0x123;
+
     #[test]
-    fun package_version_starts_at_one() {
-        assert!(package_version() == 1, 0);
+    fun package_version_is_two() {
+        assert!(package_version() == 2, 0);
     }
 
     #[test]
-    fun manufacturer_can_create_passport() {
+    fun manufacturer_can_create_unique_passport() {
         let mut scenario = ts::begin(ADMIN);
         init(scenario.ctx());
 
         scenario.next_tx(ADMIN);
         let admin_cap: AdminCap = scenario.take_from_sender();
+        let mut registry: DeviceRegistry = scenario.take_shared();
 
-        create_passport(
-            &admin_cap,
-            std::string::utf8(b"MacBook Pro 14"),
-            std::string::utf8(b"C02*****92"),
-            LIFECYCLE_USED,
-            1_753_401_600_000,
-            scenario.ctx(),
-        );
+        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+        assert!(registry_count(&registry) == 1, 0);
+        assert!(is_serial_registered(&registry, DEMO_SERIAL_HASH), 0);
+
         scenario.return_to_sender(admin_cap);
+        ts::return_shared(registry);
 
         scenario.next_tx(ADMIN);
         let passport: DevicePassport = scenario.take_shared();
 
         assert!(passport_manufacturer(&passport) == ADMIN, 0);
+        assert!(passport_serial_hash(&passport) == DEMO_SERIAL_HASH, 0);
         assert!(passport_lifecycle_status(&passport) == LIFECYCLE_USED, 0);
         assert!(passport_verification_level(&passport) == VERIFICATION_MANUFACTURER, 0);
         assert!(passport_repair_count(&passport) == 0, 0);
 
         ts::return_shared(passport);
         scenario.end();
+    }
+
+    #[test]
+    #[expected_failure(abort_code = E_DEVICE_ALREADY_REGISTERED)]
+    fun duplicate_serial_is_rejected() {
+        let mut scenario = ts::begin(ADMIN);
+        init(scenario.ctx());
+
+        scenario.next_tx(ADMIN);
+        let admin_cap: AdminCap = scenario.take_from_sender();
+        let mut registry: DeviceRegistry = scenario.take_shared();
+
+        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+
+        abort 0
     }
 
     #[test]
@@ -364,6 +433,7 @@ module redevice::redevice {
 
         scenario.next_tx(ADMIN);
         let admin_cap: AdminCap = scenario.take_from_sender();
+        let mut registry: DeviceRegistry = scenario.take_shared();
 
         grant_repairer(
             &admin_cap,
@@ -371,17 +441,31 @@ module redevice::redevice {
             std::string::utf8(b"Lisbon Repair Center"),
             scenario.ctx(),
         );
+        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+
+        scenario.return_to_sender(admin_cap);
+        ts::return_shared(registry);
+        scenario
+    }
+
+    #[test_only]
+    fun create_demo_passport(
+        admin_cap: &AdminCap,
+        registry: &mut DeviceRegistry,
+        ctx: &mut TxContext,
+    ) {
         create_passport(
-            &admin_cap,
+            admin_cap,
+            registry,
+            std::string::utf8(b"Azat's MacBook"),
+            std::string::utf8(b"Apple"),
             std::string::utf8(b"MacBook Pro 14"),
             std::string::utf8(b"C02*****92"),
+            DEMO_SERIAL_HASH,
             LIFECYCLE_USED,
             1_753_401_600_000,
-            scenario.ctx(),
+            ctx,
         );
-        scenario.return_to_sender(admin_cap);
-
-        scenario
     }
 
     #[test_only]

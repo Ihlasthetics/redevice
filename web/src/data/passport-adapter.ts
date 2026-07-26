@@ -1,3 +1,5 @@
+import { TESTNET_PASSPORT_ID, transactionExplorerUrl } from "../constants";
+
 export type LifecycleCondition =
   "Inspected" | "Refurbished" | "In service" | "Retired";
 
@@ -45,9 +47,12 @@ export type RepairRecord = {
 export type PublicDevicePassport = {
   id: string;
   manufacturer: string;
+  deviceName: string;
+  brand: string;
   model: string;
   category: string;
   maskedSerial: string;
+  serialHash: string | null;
   condition: LifecycleCondition;
   coverageStart: {
     isoDate: string;
@@ -122,159 +127,248 @@ export type PassportQrResolution =
       message: string;
     };
 
-const samplePassport: PublicDevicePassport = {
-  id: "RDP-2026-0148",
-  manufacturer: "Apple",
-  model: "MacBook Pro 14-inch",
+type SuiObjectJson = {
+  objectId: string;
+  type: string;
+  previousTransaction?: string | null;
+  json?: unknown;
+};
+
+type OnchainRepair = {
+  attested_at_ms: string | number;
+  battery_health: string | number;
+  evidence_blob_id: string;
+  new_status: string | number;
+  notes: string;
+  previous_status: string | number;
+  repair_type: string;
+  repairer: string;
+  serviced_at_ms: string | number;
+};
+
+const lifecycleConditions: LifecycleCondition[] = [
+  "Inspected",
+  "Refurbished",
+  "In service",
+  "Retired",
+];
+
+export function lifecycleConditionFromCode(
+  value: string | number,
+): LifecycleCondition {
+  const index = Number(value);
+  return lifecycleConditions[index] ?? "Inspected";
+}
+
+export function lifecycleConditionToCode(value: LifecycleCondition): number {
+  const index = lifecycleConditions.indexOf(value);
+  return index < 0 ? 0 : index;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The Sui object does not contain readable Move fields.");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requiredString(fields: Record<string, unknown>, key: string): string {
+  const value = fields[key];
+
+  if (typeof value !== "string") {
+    throw new Error(`The passport is missing its ${key} field.`);
+  }
+
+  return value;
+}
+
+function optionalString(
+  fields: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = fields[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatAddress(address: string) {
+  return `${address.slice(0, 8)}…${address.slice(-6)}`;
+}
+
+function formatDate(timestamp: string | number) {
+  const date = new Date(Number(timestamp));
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("The passport contains an invalid timestamp.");
+  }
+
+  return {
+    isoDate: date.toISOString().slice(0, 10),
+    displayDate: new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(date),
+  };
+}
+
+function inferCategory(model: string) {
+  const normalized = model.toLowerCase();
+
+  if (normalized.includes("macbook") || normalized.includes("laptop")) {
+    return "Laptop computer";
+  }
+
+  if (normalized.includes("phone") || normalized.includes("iphone")) {
+    return "Mobile phone";
+  }
+
+  return "Electronic device";
+}
+
+function inferBrand(model: string) {
+  return /macbook|iphone|ipad|apple/i.test(model) ? "Apple" : "Unknown brand";
+}
+
+function maskSerial(serial: string) {
+  return serial.replace(/\*+/g, (hidden) => "•".repeat(hidden.length));
+}
+
+function evidenceLink(reference: string): RepairRecordLink {
+  if (/^https?:\/\//i.test(reference)) {
+    return { label: "Public evidence", url: reference };
+  }
+
+  return {
+    label: reference
+      ? `Evidence ref · ${reference.slice(0, 28)}${reference.length > 28 ? "…" : ""}`
+      : "No evidence reference",
+    url: null,
+  };
+}
+
+function isOnchainRepair(value: unknown): value is OnchainRepair {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const repair = value as Partial<OnchainRepair>;
+  return (
+    typeof repair.repair_type === "string" &&
+    typeof repair.notes === "string" &&
+    typeof repair.repairer === "string" &&
+    typeof repair.evidence_blob_id === "string" &&
+    repair.serviced_at_ms !== undefined &&
+    repair.previous_status !== undefined &&
+    repair.new_status !== undefined
+  );
+}
+
+const fallbackPassport: PublicDevicePassport = {
+  id: TESTNET_PASSPORT_ID,
+  manufacturer: "0xd7fd25…5f215",
+  deviceName: "Demo MacBook",
+  brand: "Apple",
+  model: "MacBook Pro 14",
   category: "Laptop computer",
   maskedSerial: "C02•••••92",
+  serialHash: null,
   condition: "Refurbished",
   coverageStart: {
     isoDate: "2026-07-25",
     displayDate: "25 July 2026",
   },
   verification: {
-    label: "Repairer verified",
+    label: "Testnet record",
     explanation:
-      "Records added to this passport must be signed by a repairer authorized by the ReDevice contract.",
+      "This fallback mirrors the published ReDevice Testnet passport while the live RPC reconnects.",
   },
   repairHistory: [
     {
-      id: "service-002",
+      id: "repair-1",
       serviceDate: {
         isoDate: "2026-07-25",
         displayDate: "25 July 2026",
       },
-      repairType: "Battery replacement",
-      summary:
-        "Battery replaced and the device completed a post-service inspection.",
-      repairer: "Lisbon Device Lab",
+      repairType: "Battery Replacement",
+      summary: "Battery replaced and full diagnostic completed",
+      repairer: "ReDevice Lisbon Service · 0xd7fd25…5f215",
       conditionChange: {
         previous: "Inspected",
         next: "Refurbished",
       },
       batteryHealth: 96,
       evidence: {
-        label: "Public evidence",
+        label: "Evidence ref · battery-diagnostic-001",
         url: null,
       },
       transaction: {
-        label: "Sui Explorer",
-        url: null,
-      },
-      repairerDetails: {
-        workOrderReference: "WO-2026-0725-018",
-        laborMinutes: 54,
-        diagnostics: [
-          "Battery capacity was below the service threshold.",
-          "Charging, thermal, and sleep checks passed after replacement.",
-        ],
-        partsUsed: [
-          {
-            name: "Replacement battery assembly",
-            reference: "BAT-MBP14-DEMO",
-            quantity: 1,
-          },
-        ],
-        technicianNotes:
-          "Battery was replaced, the enclosure was resealed, and post-service diagnostics completed without a reported fault.",
-      },
-    },
-    {
-      id: "service-001",
-      serviceDate: {
-        isoDate: "2026-07-21",
-        displayDate: "21 July 2026",
-      },
-      repairType: "Initial inspection",
-      summary:
-        "Core functions, enclosure, display, ports, and charging were inspected.",
-      repairer: "Lisbon Device Lab",
-      conditionChange: {
-        previous: "In service",
-        next: "Inspected",
-      },
-      evidence: {
-        label: "Public evidence",
-        url: null,
-      },
-      transaction: {
-        label: "Sui Explorer",
-        url: null,
-      },
-      repairerDetails: {
-        workOrderReference: "WO-2026-0721-006",
-        laborMinutes: 35,
-        diagnostics: [
-          "Display, keyboard, ports, speakers, camera, and charging were checked.",
-          "Battery health required follow-up service.",
-        ],
-        partsUsed: [],
-        technicianNotes:
-          "Initial intake inspection completed. The device was held for a battery replacement before refurbishment.",
+        label: "View on SuiVision",
+        url: transactionExplorerUrl(
+          "CLe1iBPyaCqHwrwbJnPFwDHiD1CU3AfuAZpZ2WggpyeZ",
+        ),
       },
     },
   ],
 };
 
-const sampleRepairWorkspace: RepairWorkspaceConfig = {
-  selectedDeviceId: samplePassport.id,
+const repairWorkspace: RepairWorkspaceConfig = {
+  selectedDeviceId: TESTNET_PASSPORT_ID,
   repairTypes: [
-    "Battery replacement",
-    "Display replacement",
-    "Keyboard replacement",
-    "Port repair",
-    "Initial inspection",
-    "Other service",
+    "Battery Replacement",
+    "Display Replacement",
+    "Keyboard Replacement",
+    "Port Repair",
+    "Initial Inspection",
+    "Other Service",
   ],
-  lifecycleConditions: ["Inspected", "Refurbished", "In service", "Retired"],
-  defaultRepairType: "Battery replacement",
+  lifecycleConditions,
+  defaultRepairType: "Battery Replacement",
   defaultNextCondition: "Refurbished",
   privacyWarning:
-    "Evidence will be public. Never upload full serial numbers, invoices, customer names, addresses, private documents, recovery phrases, or private keys.",
+    "This transaction is public. Never include full serial numbers, invoices, customer names, addresses, private documents, recovery phrases, or private keys.",
   integrationNotice:
-    "This form prepares the frontend only. It cannot upload to Walrus, request a wallet signature, or submit a Sui transaction until the contract integration is connected.",
+    "The repair details are written to Sui Testnet. Walrus upload is not connected in this build, so a selected file creates only a public demo evidence reference; the file itself is not uploaded.",
 };
 
-const sampleTransactionStates: TransactionStatusDefinition[] = [
+const transactionStates: TransactionStatusDefinition[] = [
   {
     id: "ready",
     shortLabel: "Ready",
-    label: "Ready to submit",
+    label: "Ready to prepare",
     description:
-      "The service draft is complete and the connected wallet is authorized.",
+      "Review every public field and connect the authorized Sui Testnet wallet.",
     nextStep:
-      "The real integration will start the public evidence upload after the repairer confirms.",
+      "When authorization is confirmed, the submit button becomes active.",
     tone: "neutral",
   },
   {
     id: "uploading",
-    shortLabel: "Uploading",
-    label: "Uploading public evidence",
+    shortLabel: "Evidence",
+    label: "Preparing evidence reference",
     description:
-      "The selected non-sensitive file is being stored on Walrus before the repair record is submitted.",
-    nextStep:
-      "Keep this page open. A wallet signature will be requested after the upload succeeds.",
+      "The frontend is preparing a demo evidence reference. No file bytes are uploaded.",
+    nextStep: "The wallet signature request comes next.",
     tone: "pending",
   },
   {
     id: "awaiting-signature",
     shortLabel: "Signature",
-    label: "Awaiting wallet signature",
+    label: "Approve in your wallet",
     description:
-      "The repair record is prepared and waiting for the connected wallet to approve it.",
+      "Your Sui wallet is waiting for approval of the Testnet transaction.",
     nextStep:
-      "Review the device, repair details, lifecycle change, and network in the wallet.",
+      "Check the package, device, and public repair details before signing.",
     tone: "pending",
   },
   {
     id: "submitting",
     shortLabel: "Submitting",
-    label: "Submitting to Sui testnet",
+    label: "Submitting to Sui Testnet",
     description:
-      "The signed repair record has been sent to Sui and is waiting for confirmation.",
-    nextStep:
-      "Do not submit again. The passport will refresh after the transaction is confirmed.",
+      "The signed repair record is waiting for final network confirmation.",
+    nextStep: "Keep this page open and do not submit the same record twice.",
     tone: "pending",
   },
   {
@@ -282,32 +376,92 @@ const sampleTransactionStates: TransactionStatusDefinition[] = [
     shortLabel: "Confirmed",
     label: "Repair record confirmed",
     description:
-      "Sui confirmed the authorized repairer's update and the passport can now show the new record.",
-    nextStep:
-      "A real confirmation will include a Sui Explorer link and the public Walrus evidence link.",
+      "Sui confirmed the authorized update and the live passport has been refreshed.",
+    nextStep: "Open the transaction in SuiVision or scan the device again.",
     tone: "success",
   },
   {
     id: "rejected",
     shortLabel: "Rejected",
-    label: "Wallet lacks permission",
+    label: "Transaction not submitted",
     description:
-      "The Move contract rejected this update because the connected wallet is not an authorized repairer.",
+      "The wallet lacks permission, the signature was rejected, or Sui returned an error.",
     nextStep:
-      "No repair record was added. Connect an authorized wallet or ask the prototype administrator to grant permission.",
+      "Read the message below, then connect the authorized Testnet wallet and retry.",
     tone: "danger",
   },
 ];
 
 export const passportAdapter = {
   getPublicPassport(): PublicDevicePassport {
-    return samplePassport;
+    return fallbackPassport;
   },
 
-  getPublicPassportById(deviceId: string): PublicDevicePassport | undefined {
-    return deviceId.toUpperCase() === samplePassport.id
-      ? samplePassport
-      : undefined;
+  fromSuiObject(object: SuiObjectJson): PublicDevicePassport {
+    const fields = asRecord(object.json);
+    const model = requiredString(fields, "model");
+    const manufacturer = requiredString(fields, "manufacturer");
+    const repairs = Array.isArray(fields.repairs)
+      ? fields.repairs.filter(isOnchainRepair)
+      : [];
+    const lastRepairIndex = repairs.length - 1;
+
+    return {
+      id: object.objectId,
+      manufacturer: formatAddress(manufacturer),
+      deviceName: optionalString(fields, "device_name") ?? model,
+      brand: optionalString(fields, "brand") ?? inferBrand(model),
+      model,
+      category: inferCategory(model),
+      maskedSerial: maskSerial(requiredString(fields, "masked_serial")),
+      serialHash: optionalString(fields, "serial_hash"),
+      condition: lifecycleConditionFromCode(
+        String(fields.lifecycle_status ?? 0),
+      ),
+      coverageStart: formatDate(
+        String(fields.history_started_at_ms ?? Date.now()),
+      ),
+      verification: {
+        label:
+          Number(fields.verification_level ?? 0) >= 2
+            ? "Contract verified"
+            : "On-chain record",
+        explanation:
+          "This passport and its service history were read directly from the published ReDevice package on Sui Testnet.",
+      },
+      repairHistory: repairs
+        .map((repair, index): RepairRecord => {
+          const transactionDigest =
+            index === lastRepairIndex ? object.previousTransaction : undefined;
+
+          return {
+            id: `repair-${index + 1}`,
+            serviceDate: formatDate(repair.serviced_at_ms),
+            repairType: repair.repair_type,
+            summary: repair.notes,
+            repairer: `ReDevice repairer · ${formatAddress(repair.repairer)}`,
+            conditionChange: {
+              previous: lifecycleConditionFromCode(repair.previous_status),
+              next: lifecycleConditionFromCode(repair.new_status),
+            },
+            batteryHealth:
+              Number(repair.battery_health) > 0
+                ? Number(repair.battery_health)
+                : undefined,
+            evidence: evidenceLink(repair.evidence_blob_id),
+            transaction: transactionDigest
+              ? {
+                  label: "View on SuiVision",
+                  url: transactionExplorerUrl(transactionDigest),
+                }
+              : {
+                  label: "Earlier transaction",
+                  url: null,
+                },
+          };
+        })
+        .reverse(),
+    };
   },
 };
 
@@ -331,7 +485,7 @@ function readDeviceIdFromQrPayload(payload: string): string | null {
       }
     }
   } catch {
-    // A QR payload may be a URL or a plain device ID instead of JSON.
+    // A QR payload may be a URL or a plain object ID instead of JSON.
   }
 
   try {
@@ -349,87 +503,111 @@ function readDeviceIdFromQrPayload(payload: string): string | null {
       .split("/")
       .filter(Boolean)
       .reverse()
-      .find((segment) => /^RDP-[A-Z0-9-]+$/i.test(segment));
+      .find((segment) => /^0x[a-f0-9]{64}$/i.test(segment));
 
     if (pathId) {
       return pathId;
     }
   } catch {
-    // The payload may be a ReDevice URI or a plain device ID.
+    // The payload may be a ReDevice URI or a plain Sui object ID.
   }
 
   const reDeviceUri = value.match(/^redevice:(?:passport:)?(.+)$/i);
   const candidate = reDeviceUri?.[1] ?? value;
 
-  return /^RDP-[A-Z0-9-]{4,64}$/i.test(candidate) ? candidate.trim() : null;
+  return /^0x[a-f0-9]{64}$/i.test(candidate) ? candidate.trim() : null;
 }
 
 export const qrPassportAdapter = {
   getSamplePayload(): string {
-    return samplePassport.id;
+    return TESTNET_PASSPORT_ID;
   },
 
-  resolve(payload: string): PassportQrResolution {
+  readDeviceId(payload: string): string | null {
+    return readDeviceIdFromQrPayload(payload);
+  },
+
+  resolve(
+    payload: string,
+    livePassport: PublicDevicePassport,
+  ): PassportQrResolution {
     const deviceId = readDeviceIdFromQrPayload(payload);
 
     if (!deviceId) {
       return {
         status: "invalid",
         message:
-          "This QR code does not contain a supported ReDevice passport ID.",
+          "This QR code does not contain a supported Sui passport object ID.",
       };
     }
 
-    const passport = passportAdapter.getPublicPassportById(deviceId);
-
-    if (!passport) {
+    if (deviceId.toLowerCase() !== livePassport.id.toLowerCase()) {
       return {
         status: "not-found",
         deviceId,
         message:
-          "The QR code is valid, but this frontend sample does not have data for that device yet.",
+          "The QR code is valid, but this demo is configured for a different Testnet passport.",
       };
     }
 
     return {
       status: "matched",
-      deviceId: passport.id,
-      passport,
+      deviceId: livePassport.id,
+      passport: livePassport,
     };
   },
 };
 
 export const repairWorkspaceAdapter = {
   getConfig(): RepairWorkspaceConfig {
-    return sampleRepairWorkspace;
+    return repairWorkspace;
   },
 
-  getAuthorization(walletAddress: string | null): RepairerAuthorization {
+  getAuthorization(
+    walletAddress: string | null,
+    authorizationResult?: boolean,
+  ): RepairerAuthorization {
     if (!walletAddress) {
       return {
         status: "disconnected",
         label: "Wallet not connected",
         explanation:
-          "Connect a Sui testnet wallet before checking repair permission.",
+          "Connect the Sui Testnet wallet that owns the repairer authorization.",
+      };
+    }
+
+    if (authorizationResult === undefined) {
+      return {
+        status: "unchecked",
+        label: "Authorization check pending",
+        explanation: "Reading the shared RepairerCap from Sui Testnet.",
+      };
+    }
+
+    if (authorizationResult) {
+      return {
+        status: "authorized",
+        label: "Authorized repairer",
+        explanation:
+          "The active on-chain RepairerCap matches this wallet address.",
       };
     }
 
     return {
-      status: "unchecked",
-      label: "Authorization check pending",
-      explanation:
-        "The wallet is connected, but the published Move package is not integrated yet, so repair permission has not been checked onchain.",
+      status: "unauthorized",
+      label: "Wallet lacks permission",
+      explanation: "This wallet does not match the active Testnet RepairerCap.",
     };
   },
 };
 
 export const transactionStatusAdapter = {
   getAll(): TransactionStatusDefinition[] {
-    return sampleTransactionStates;
+    return transactionStates;
   },
 
   getById(status: TransactionStatus): TransactionStatusDefinition {
-    const state = sampleTransactionStates.find((item) => item.id === status);
+    const state = transactionStates.find((item) => item.id === status);
 
     if (!state) {
       throw new Error(`Unknown transaction status: ${status}`);

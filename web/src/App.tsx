@@ -5,20 +5,29 @@ import {
   CalendarDays,
   Check,
   CircleCheck,
-  Eye,
   FileCheck2,
   History,
   Laptop,
   Link2Off,
+  PackagePlus,
+  QrCode,
   ScanLine,
   ShieldCheck,
+  WalletCards,
   Wrench,
 } from "lucide-react";
-import { useState } from "react";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
+import { ConnectButton } from "@mysten/dapp-kit-react/ui";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { TESTNET_PASSPORT_ID, objectExplorerUrl } from "./constants";
 import {
   passportAdapter,
   type RepairRecordLink,
 } from "./data/passport-adapter";
+import { loadTestnetPassport } from "./data/sui-passport";
+import DeviceRegistration from "./components/DeviceRegistration";
+import PassportQrDownload from "./components/PassportQrDownload";
 import QrPassportScanner from "./components/QrPassportScanner";
 import RepairWorkspace from "./components/RepairWorkspace";
 
@@ -33,11 +42,10 @@ function RecordLink({
     return (
       <span
         className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-dashed border-line bg-canvas px-3.5 text-xs font-semibold text-muted"
-        aria-label={`${resource.label} not available in sample data`}
+        aria-label={`${resource.label} does not have a public URL`}
       >
         <Link2Off aria-hidden="true" className="size-4" />
         {resource.label}
-        <span className="font-normal">· sample unavailable</span>
       </span>
     );
   }
@@ -57,9 +65,30 @@ function RecordLink({
 }
 
 function App() {
+  const client = useCurrentClient();
   const [passport, setPassport] = useState(() =>
     passportAdapter.getPublicPassport(),
   );
+  const [selectedPassportId, setSelectedPassportId] = useState(() => {
+    const requestedPassportId = new URLSearchParams(window.location.search).get(
+      "passport",
+    );
+
+    return requestedPassportId && /^0x[0-9a-f]{64}$/i.test(requestedPassportId)
+      ? requestedPassportId
+      : TESTNET_PASSPORT_ID;
+  });
+  const passportQuery = useQuery({
+    queryKey: ["redevice", "passport", selectedPassportId],
+    queryFn: () => loadTestnetPassport(client, selectedPassportId),
+    refetchInterval: 15_000,
+  });
+
+  useEffect(() => {
+    if (passportQuery.data) {
+      setPassport(passportQuery.data);
+    }
+  }, [passportQuery.data]);
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -99,14 +128,19 @@ function App() {
             </a>
             <a
               className="hidden min-h-11 items-center rounded-full px-3.5 text-sm font-semibold text-muted transition-colors hover:bg-surface hover:text-ink lg:inline-flex"
-              href="#repair-workspace"
+              href="#device-registration"
             >
-              Repairer workspace
+              Register device
             </a>
-            <p className="inline-flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-xs font-semibold text-muted sm:text-sm">
-              <Eye aria-hidden="true" className="size-4 text-brand" />
-              No wallet needed
-            </p>
+            <div className="wallet-button min-h-11">
+              <ConnectButton>
+                <span className="inline-flex items-center gap-2">
+                  <WalletCards aria-hidden="true" className="size-4" />
+                  <span className="hidden sm:inline">Repairer login</span>
+                  <span className="sm:hidden">Wallet</span>
+                </span>
+              </ConnectButton>
+            </div>
           </div>
         </div>
       </header>
@@ -115,7 +149,69 @@ function App() {
         id="passport-content"
         className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14 lg:py-18"
       >
-        <QrPassportScanner onPassportResolved={setPassport} />
+        {passportQuery.isError && (
+          <div
+            className="mb-6 rounded-2xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950"
+            role="alert"
+          >
+            Live Testnet data could not be refreshed. The last verified passport
+            snapshot remains visible; retrying automatically.
+          </div>
+        )}
+
+        <section
+          aria-labelledby="choose-path-title"
+          className="mb-8 grid gap-3 sm:grid-cols-2"
+        >
+          <h1 id="choose-path-title" className="sr-only">
+            Choose a ReDevice action
+          </h1>
+          <a
+            className="group flex min-h-24 items-center gap-4 rounded-2xl border border-line bg-surface p-5 transition-colors hover:border-brand"
+            href="#qr-scanner"
+          >
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-success-soft text-success">
+              <QrCode aria-hidden="true" className="size-5" />
+            </span>
+            <span>
+              <span className="block font-semibold">Scan or find a device</span>
+              <span className="mt-1 block text-xs leading-5 text-muted">
+                Public passport access · no wallet required
+              </span>
+            </span>
+          </a>
+          <a
+            className="group flex min-h-24 items-center gap-4 rounded-2xl border border-line bg-surface p-5 transition-colors hover:border-brand"
+            href="#device-registration"
+          >
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-canvas text-brand">
+              <PackagePlus aria-hidden="true" className="size-5" />
+            </span>
+            <span>
+              <span className="block font-semibold">Register a new device</span>
+              <span className="mt-1 block text-xs leading-5 text-muted">
+                Authorized issuer wallet required
+              </span>
+            </span>
+          </a>
+        </section>
+
+        <DeviceRegistration
+          onPassportCreated={(objectId) => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("passport", objectId);
+            window.history.replaceState({}, "", url);
+            setSelectedPassportId(objectId);
+          }}
+        />
+
+        <QrPassportScanner
+          passport={passport}
+          onPassportResolved={(resolvedPassport) => {
+            setPassport(resolvedPassport);
+            setSelectedPassportId(resolvedPassport.id);
+          }}
+        />
 
         <section aria-labelledby="passport-title">
           <div className="flex flex-col gap-8 border-b border-line pb-10 sm:pb-12 lg:flex-row lg:items-end lg:justify-between">
@@ -125,14 +221,16 @@ function App() {
                   Public device passport
                 </p>
                 <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
-                  Sample data
+                  {passportQuery.isPending
+                    ? "Loading Testnet"
+                    : "Live Sui Testnet"}
                 </span>
               </div>
               <h1
                 id="passport-title"
                 className="mt-5 text-4xl font-semibold leading-[1.04] tracking-[-0.04em] sm:text-5xl lg:text-6xl"
               >
-                {passport.model}
+                {passport.deviceName}
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
                 A plain-language record of this device&apos;s identity,
@@ -189,13 +287,19 @@ function App() {
                   Device identity
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em]">
-                  {passport.manufacturer} {passport.model}
+                  {passport.brand} {passport.model}
                 </h2>
                 <p className="mt-2 text-sm text-muted">{passport.category}</p>
               </div>
-              <p className="self-start rounded-full bg-canvas px-3 py-1.5 font-mono text-xs font-semibold text-muted">
-                {passport.id}
-              </p>
+              <a
+                className="max-w-full self-start truncate rounded-full bg-canvas px-3 py-1.5 font-mono text-xs font-semibold text-muted transition-colors hover:text-brand"
+                href={objectExplorerUrl(passport.id)}
+                target="_blank"
+                rel="noreferrer"
+                title={passport.id}
+              >
+                {passport.id.slice(0, 10)}…{passport.id.slice(-6)}
+              </a>
             </div>
 
             <dl className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
@@ -223,6 +327,21 @@ function App() {
 
               <div className="bg-surface p-5 sm:col-span-2">
                 <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                  Duplicate protection
+                </dt>
+                <dd className="mt-2 flex items-center gap-2 text-sm font-semibold">
+                  <ShieldCheck
+                    aria-hidden="true"
+                    className="size-5 shrink-0 text-success"
+                  />
+                  {passport.serialHash
+                    ? `Serial hash bound · ${passport.serialHash.slice(0, 10)}…${passport.serialHash.slice(-6)}`
+                    : "Legacy passport · serial registry not available"}
+                </dd>
+              </div>
+
+              <div className="bg-surface p-5 sm:col-span-2">
+                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
                   Verified history begins
                 </dt>
                 <dd className="mt-2 flex items-center gap-2 text-lg font-semibold">
@@ -233,6 +352,14 @@ function App() {
                   <time dateTime={passport.coverageStart.isoDate}>
                     {passport.coverageStart.displayDate}
                   </time>
+                </dd>
+              </div>
+              <div className="bg-surface p-5 sm:col-span-2">
+                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                  Registered issuer
+                </dt>
+                <dd className="mt-2 font-mono text-sm font-semibold">
+                  {passport.manufacturer}
                 </dd>
               </div>
             </dl>
@@ -254,6 +381,16 @@ function App() {
                 </div>
               </div>
             </div>
+
+            <PassportQrDownload
+              className="mt-6 bg-canvas"
+              passportId={passport.id}
+              deviceName={passport.deviceName}
+              brand={passport.brand}
+              model={passport.model}
+              maskedSerial={passport.maskedSerial}
+              registeredAt={passport.coverageStart.displayDate}
+            />
           </article>
         </section>
 
@@ -313,9 +450,8 @@ function App() {
                   className="mt-0.5 size-5 shrink-0 text-brand"
                 />
                 <p className="text-xs leading-5 text-muted">
-                  This sample timeline is for interface review. Evidence and
-                  Explorer links remain unavailable until real testnet records
-                  are connected.
+                  This timeline is read from the shared DevicePassport object on
+                  Sui Testnet and refreshes automatically.
                 </p>
               </div>
             </div>
@@ -415,11 +551,14 @@ function App() {
           </div>
         </section>
 
-        <RepairWorkspace passport={passport} />
+        <RepairWorkspace
+          passport={passport}
+          onRepairConfirmed={() => passportQuery.refetch()}
+        />
 
         <footer className="border-t border-line pt-6 text-xs leading-5 text-muted">
-          This sample passport uses mock data for interface review. No record on
-          this page is presented as an onchain transaction.
+          Live prototype · ReDevice package and passport data are read from Sui
+          Testnet. Physical repair claims remain repairer attestations.
         </footer>
       </main>
     </div>

@@ -12,6 +12,10 @@ export const TESTNET_REPAIRER_CAP_ID =
   import.meta.env.VITE_SUI_REPAIRER_CAP_ID ||
   "0xab7b404781516f3bd0cda69f0cff2672a52f7a9abdb67fa112e180256a602b96";
 
+export const TESTNET_REGISTRAR_CAP_ID =
+  import.meta.env.VITE_SUI_REGISTRAR_CAP_ID ||
+  "0x04ff58fb952f681e9a8db94d2f6d754b0a663cc1507a277c701cc18ef6ddb952";
+
 export const TESTNET_ADMIN_CAP_ID =
   import.meta.env.VITE_SUI_ADMIN_CAP_ID ||
   "0x04ff58fb952f681e9a8db94d2f6d754b0a663cc1507a277c701cc18ef6ddb952";

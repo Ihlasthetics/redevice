@@ -17,7 +17,7 @@ module redevice::redevice {
     #[test_only]
     use sui::test_scenario as ts;
 
-    const PACKAGE_VERSION: u64 = 2;
+    const PACKAGE_VERSION: u64 = 3;
 
     const LIFECYCLE_USED: u8 = 0;
     const LIFECYCLE_REPAIRED: u8 = 1;
@@ -35,6 +35,8 @@ module redevice::redevice {
     const E_ALREADY_REVOKED: u64 = 6;
     const E_DEVICE_ALREADY_REGISTERED: u64 = 7;
     const E_INVALID_SERIAL_HASH: u64 = 8;
+    const E_INVALID_REGISTRAR: u64 = 9;
+    const E_REGISTRAR_REVOKED: u64 = 10;
 
     /// Created once when the package is published and owned by the publisher.
     public struct AdminCap has key, store {
@@ -46,6 +48,14 @@ module redevice::redevice {
         id: UID,
         serial_to_passport: Table<address, ID>,
         registered_count: u64,
+    }
+
+    /// A shared authorization object for one device registrar wallet.
+    public struct RegistrarCap has key {
+        id: UID,
+        registrar: address,
+        display_name: String,
+        active: bool,
     }
 
     /// A shared authorization object for one repairer wallet.
@@ -94,6 +104,16 @@ module redevice::redevice {
         repairer: address,
     }
 
+    public struct RegistrarGranted has copy, drop {
+        cap_id: ID,
+        registrar: address,
+    }
+
+    public struct RegistrarRevoked has copy, drop {
+        cap_id: ID,
+        registrar: address,
+    }
+
     public struct PassportCreated has copy, drop {
         passport_id: ID,
         manufacturer: address,
@@ -118,6 +138,41 @@ module redevice::redevice {
 
         transfer::transfer(admin_cap, tx_context::sender(ctx));
         transfer::share_object(registry);
+    }
+
+    /// Grants an address permission to create device passports.
+    public entry fun grant_registrar(
+        _admin: &AdminCap,
+        registrar: address,
+        display_name: String,
+        ctx: &mut TxContext,
+    ) {
+        assert!(registrar != @0x0, E_INVALID_REGISTRAR);
+
+        let cap = RegistrarCap {
+            id: object::new(ctx),
+            registrar,
+            display_name,
+            active: true,
+        };
+        let cap_id = object::id(&cap);
+
+        event::emit(RegistrarGranted { cap_id, registrar });
+        transfer::share_object(cap);
+    }
+
+    /// Revokes a registrar's permission without deleting its audit trail.
+    public entry fun revoke_registrar(
+        _admin: &AdminCap,
+        cap: &mut RegistrarCap,
+    ) {
+        assert!(cap.active, E_ALREADY_REVOKED);
+
+        cap.active = false;
+        event::emit(RegistrarRevoked {
+            cap_id: object::id(cap),
+            registrar: cap.registrar,
+        });
     }
 
     /// Grants an address permission to attest repairs.
@@ -157,7 +212,7 @@ module redevice::redevice {
 
     /// Creates one passport for a serial hash and records it atomically.
     public entry fun create_passport(
-        _admin: &AdminCap,
+        registrar_cap: &RegistrarCap,
         registry: &mut DeviceRegistry,
         device_name: String,
         brand: String,
@@ -168,6 +223,10 @@ module redevice::redevice {
         history_started_at_ms: u64,
         ctx: &mut TxContext,
     ) {
+        let sender = tx_context::sender(ctx);
+
+        assert!(registrar_cap.active, E_REGISTRAR_REVOKED);
+        assert!(sender == registrar_cap.registrar, E_NOT_CAP_HOLDER);
         assert!(is_valid_lifecycle_status(lifecycle_status), E_INVALID_LIFECYCLE_STATUS);
         assert!(serial_hash != @0x0, E_INVALID_SERIAL_HASH);
         assert!(
@@ -175,7 +234,7 @@ module redevice::redevice {
             E_DEVICE_ALREADY_REGISTERED,
         );
 
-        let manufacturer = tx_context::sender(ctx);
+        let manufacturer = sender;
         let passport = DevicePassport {
             id: object::new(ctx),
             manufacturer,
@@ -258,6 +317,14 @@ module redevice::redevice {
         cap.repairer
     }
 
+    public fun registrar_address(cap: &RegistrarCap): address {
+        cap.registrar
+    }
+
+    public fun registrar_is_active(cap: &RegistrarCap): bool {
+        cap.active
+    }
+
     public fun repairer_is_active(cap: &RepairerCap): bool {
         cap.active
     }
@@ -308,17 +375,20 @@ module redevice::redevice {
     const ADMIN: address = @0xA;
 
     #[test_only]
-    const AUTHORIZED_REPAIRER: address = @0xB;
+    const AUTHORIZED_REGISTRAR: address = @0xB;
 
     #[test_only]
-    const UNAUTHORIZED_USER: address = @0xC;
+    const AUTHORIZED_REPAIRER: address = @0xC;
+
+    #[test_only]
+    const UNAUTHORIZED_USER: address = @0xD;
 
     #[test_only]
     const DEMO_SERIAL_HASH: address = @0x123;
 
     #[test]
-    fun package_version_is_two() {
-        assert!(package_version() == 2, 0);
+    fun package_version_is_three() {
+        assert!(package_version() == 3, 0);
     }
 
     #[test]
@@ -328,19 +398,29 @@ module redevice::redevice {
 
         scenario.next_tx(ADMIN);
         let admin_cap: AdminCap = scenario.take_from_sender();
+        grant_registrar(
+            &admin_cap,
+            AUTHORIZED_REGISTRAR,
+            std::string::utf8(b"Lisbon Device Issuer"),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(admin_cap);
+
+        scenario.next_tx(AUTHORIZED_REGISTRAR);
+        let registrar_cap: RegistrarCap = scenario.take_shared();
         let mut registry: DeviceRegistry = scenario.take_shared();
 
-        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+        create_demo_passport(&registrar_cap, &mut registry, scenario.ctx());
         assert!(registry_count(&registry) == 1, 0);
         assert!(is_serial_registered(&registry, DEMO_SERIAL_HASH), 0);
 
-        scenario.return_to_sender(admin_cap);
+        ts::return_shared(registrar_cap);
         ts::return_shared(registry);
 
-        scenario.next_tx(ADMIN);
+        scenario.next_tx(AUTHORIZED_REGISTRAR);
         let passport: DevicePassport = scenario.take_shared();
 
-        assert!(passport_manufacturer(&passport) == ADMIN, 0);
+        assert!(passport_manufacturer(&passport) == AUTHORIZED_REGISTRAR, 0);
         assert!(passport_serial_hash(&passport) == DEMO_SERIAL_HASH, 0);
         assert!(passport_lifecycle_status(&passport) == LIFECYCLE_USED, 0);
         assert!(passport_verification_level(&passport) == VERIFICATION_MANUFACTURER, 0);
@@ -358,10 +438,45 @@ module redevice::redevice {
 
         scenario.next_tx(ADMIN);
         let admin_cap: AdminCap = scenario.take_from_sender();
+        grant_registrar(
+            &admin_cap,
+            AUTHORIZED_REGISTRAR,
+            std::string::utf8(b"Lisbon Device Issuer"),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(admin_cap);
+
+        scenario.next_tx(AUTHORIZED_REGISTRAR);
+        let registrar_cap: RegistrarCap = scenario.take_shared();
         let mut registry: DeviceRegistry = scenario.take_shared();
 
-        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
-        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+        create_demo_passport(&registrar_cap, &mut registry, scenario.ctx());
+        create_demo_passport(&registrar_cap, &mut registry, scenario.ctx());
+
+        abort 0
+    }
+
+    #[test]
+    #[expected_failure(abort_code = E_NOT_CAP_HOLDER)]
+    fun unauthorized_registrar_is_rejected() {
+        let mut scenario = ts::begin(ADMIN);
+        init(scenario.ctx());
+
+        scenario.next_tx(ADMIN);
+        let admin_cap: AdminCap = scenario.take_from_sender();
+        grant_registrar(
+            &admin_cap,
+            AUTHORIZED_REGISTRAR,
+            std::string::utf8(b"Lisbon Device Issuer"),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(admin_cap);
+
+        scenario.next_tx(UNAUTHORIZED_USER);
+        let registrar_cap: RegistrarCap = scenario.take_shared();
+        let mut registry: DeviceRegistry = scenario.take_shared();
+
+        create_demo_passport(&registrar_cap, &mut registry, scenario.ctx());
 
         abort 0
     }
@@ -441,21 +556,33 @@ module redevice::redevice {
             std::string::utf8(b"Lisbon Repair Center"),
             scenario.ctx(),
         );
-        create_demo_passport(&admin_cap, &mut registry, scenario.ctx());
+        grant_registrar(
+            &admin_cap,
+            AUTHORIZED_REGISTRAR,
+            std::string::utf8(b"Lisbon Device Issuer"),
+            scenario.ctx(),
+        );
 
         scenario.return_to_sender(admin_cap);
+        ts::return_shared(registry);
+
+        scenario.next_tx(AUTHORIZED_REGISTRAR);
+        let registrar_cap: RegistrarCap = scenario.take_shared();
+        let mut registry: DeviceRegistry = scenario.take_shared();
+        create_demo_passport(&registrar_cap, &mut registry, scenario.ctx());
+        ts::return_shared(registrar_cap);
         ts::return_shared(registry);
         scenario
     }
 
     #[test_only]
     fun create_demo_passport(
-        admin_cap: &AdminCap,
+        registrar_cap: &RegistrarCap,
         registry: &mut DeviceRegistry,
         ctx: &mut TxContext,
     ) {
         create_passport(
-            admin_cap,
+            registrar_cap,
             registry,
             std::string::utf8(b"Azat's MacBook"),
             std::string::utf8(b"Apple"),

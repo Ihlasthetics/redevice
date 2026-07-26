@@ -18,13 +18,13 @@ import {
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import {
-  TESTNET_ADMIN_CAP_ID,
-  TESTNET_ISSUER_ADDRESS,
   TESTNET_PACKAGE_ID,
+  TESTNET_REGISTRAR_CAP_ID,
   TESTNET_REGISTRY_ID,
   objectExplorerUrl,
   transactionExplorerUrl,
 } from "../constants";
+import { useRegistrarAuthorization } from "../hooks/use-registrar-authorization";
 import PassportQrDownload from "./PassportQrDownload";
 
 type RegistrationStatus =
@@ -156,8 +156,8 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
   const client = useCurrentClient();
   const currentAccount = useCurrentAccount();
   const walletAddress = currentAccount?.address ?? null;
-  const isIssuer =
-    walletAddress?.toLowerCase() === TESTNET_ISSUER_ADDRESS.toLowerCase();
+  const authorizationQuery = useRegistrarAuthorization(walletAddress);
+  const isIssuer = authorizationQuery.data === true;
   const [deviceName, setDeviceName] = useState("My MacBook");
   const [brand, setBrand] = useState("Apple");
   const [model, setModel] = useState("MacBook Air M3");
@@ -181,7 +181,9 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
 
     if (!walletAddress || !isIssuer) {
       setStatus("rejected");
-      setError("Connect the authorized issuer wallet that owns the AdminCap.");
+      setError(
+        "Connect an authorized issuer wallet with an active RegistrarCap.",
+      );
       return;
     }
 
@@ -212,7 +214,7 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
         transaction.moveCall({
           target: `${TESTNET_PACKAGE_ID}::redevice::create_passport`,
           arguments: [
-            transaction.object(TESTNET_ADMIN_CAP_ID),
+            transaction.object(TESTNET_REGISTRAR_CAP_ID),
             transaction.object(TESTNET_REGISTRY_ID),
             transaction.pure.string(safeDeviceName),
             transaction.pure.string(safeBrand),
@@ -325,8 +327,8 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   Capability-gated issuance
                 </p>
                 <p className="mt-1.5 text-xs leading-5 text-canvas/65">
-                  The Move contract verifies both the AdminCap and the unique
-                  serial hash before issuing a passport.
+                  The Move contract verifies both the RegistrarCap and the
+                  unique serial hash before issuing a passport.
                 </p>
               </div>
             </div>
@@ -357,7 +359,28 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
             </div>
           )}
 
-          {walletAddress && !isIssuer && (
+          {walletAddress && authorizationQuery.isPending && (
+            <div
+              className="flex min-h-72 flex-col items-start justify-center"
+              role="status"
+            >
+              <span className="grid size-12 place-items-center rounded-2xl bg-canvas text-brand">
+                <CircleDashed
+                  aria-hidden="true"
+                  className="size-5 animate-spin"
+                />
+              </span>
+              <h3 className="mt-5 text-xl font-semibold">
+                Checking registrar permission
+              </h3>
+              <p className="mt-2 max-w-lg text-sm leading-6 text-muted">
+                Reading the connected wallet&apos;s RegistrarCap from Sui
+                Testnet.
+              </p>
+            </div>
+          )}
+
+          {walletAddress && !authorizationQuery.isPending && !isIssuer && (
             <div
               className="flex min-h-72 flex-col items-start justify-center"
               role="status"
@@ -375,8 +398,9 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                 Issuer permission required
               </h3>
               <p className="mt-2 max-w-lg text-sm leading-6 text-muted">
-                This wallet does not own the ReDevice AdminCap. The registration
-                form stays hidden and no transaction can be submitted.
+                This wallet does not match an active ReDevice RegistrarCap. The
+                registration form stays hidden and no transaction can be
+                submitted.
               </p>
               <div className="wallet-button mt-5 min-h-11">
                 <ConnectButton />
@@ -384,7 +408,7 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
             </div>
           )}
 
-          {walletAddress && isIssuer && (
+          {walletAddress && !authorizationQuery.isPending && isIssuer && (
             <form onSubmit={handleSubmit}>
               <div className="flex items-start gap-3 border-b border-line pb-5">
                 <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success-soft text-success">

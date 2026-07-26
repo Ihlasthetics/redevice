@@ -20,7 +20,7 @@ import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { TESTNET_PASSPORT_ID, objectExplorerUrl } from "./constants";
+import { objectExplorerUrl } from "./constants";
 import {
   passportAdapter,
   type RepairRecordLink,
@@ -69,6 +69,7 @@ function App() {
   const [passport, setPassport] = useState(() =>
     passportAdapter.getPublicPassport(),
   );
+  const [hasResolvedPassport, setHasResolvedPassport] = useState(false);
   const [selectedPassportId, setSelectedPassportId] = useState(() => {
     const requestedPassportId = new URLSearchParams(window.location.search).get(
       "passport",
@@ -76,17 +77,25 @@ function App() {
 
     return requestedPassportId && /^0x[0-9a-f]{64}$/i.test(requestedPassportId)
       ? requestedPassportId
-      : TESTNET_PASSPORT_ID;
+      : null;
   });
   const passportQuery = useQuery({
     queryKey: ["redevice", "passport", selectedPassportId],
-    queryFn: () => loadTestnetPassport(client, selectedPassportId),
-    refetchInterval: 15_000,
+    queryFn: () => {
+      if (!selectedPassportId) {
+        throw new Error("A passport must be selected before it can be loaded.");
+      }
+
+      return loadTestnetPassport(client, selectedPassportId);
+    },
+    enabled: selectedPassportId !== null,
+    refetchInterval: selectedPassportId ? 15_000 : false,
   });
 
   useEffect(() => {
     if (passportQuery.data) {
       setPassport(passportQuery.data);
+      setHasResolvedPassport(true);
     }
   }, [passportQuery.data]);
 
@@ -154,8 +163,8 @@ function App() {
             className="mb-6 rounded-2xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950"
             role="alert"
           >
-            Live Testnet data could not be refreshed. The last verified passport
-            snapshot remains visible; retrying automatically.
+            This passport could not be loaded from Sui Testnet. Check the link
+            or scan a valid ReDevice QR code.
           </div>
         )}
 
@@ -201,6 +210,7 @@ function App() {
             const url = new URL(window.location.href);
             url.searchParams.set("passport", objectId);
             window.history.replaceState({}, "", url);
+            setHasResolvedPassport(false);
             setSelectedPassportId(objectId);
           }}
         />
@@ -209,11 +219,12 @@ function App() {
           passport={passport}
           onPassportResolved={(resolvedPassport) => {
             setPassport(resolvedPassport);
+            setHasResolvedPassport(true);
             setSelectedPassportId(resolvedPassport.id);
           }}
         />
 
-        <section aria-labelledby="passport-title">
+        <section aria-labelledby="passport-title" hidden={!hasResolvedPassport}>
           <div className="flex flex-col gap-8 border-b border-line pb-10 sm:pb-12 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <div className="flex flex-wrap items-center gap-2.5">
@@ -258,6 +269,7 @@ function App() {
         <section
           aria-label="Device summary"
           className="grid gap-6 py-8 sm:py-10 lg:grid-cols-[0.82fr_1.18fr]"
+          hidden={!hasResolvedPassport}
         >
           <figure className="flex min-h-72 flex-col overflow-hidden rounded-[1.75rem] border border-line bg-surface shadow-[0_28px_70px_-52px_rgba(21,31,28,0.45)] sm:min-h-96">
             <div className="grid flex-1 place-items-center bg-[radial-gradient(circle_at_center,#e3eee7_0%,#f4f2eb_66%)] p-8">
@@ -397,6 +409,7 @@ function App() {
         <aside
           aria-labelledby="limited-history-title"
           className="mb-2 rounded-[1.5rem] border border-amber-700/25 bg-amber-50 p-5 text-amber-950 sm:p-6"
+          hidden={!hasResolvedPassport}
         >
           <div className="flex items-start gap-4">
             <span className="grid size-10 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800">
@@ -427,6 +440,7 @@ function App() {
         <section
           aria-labelledby="repair-history-title"
           className="border-t border-line py-10 sm:py-14"
+          hidden={!hasResolvedPassport}
         >
           <div className="grid gap-7 lg:grid-cols-[0.72fr_1.28fr] lg:gap-12">
             <div>

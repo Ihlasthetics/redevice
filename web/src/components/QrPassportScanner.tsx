@@ -1,4 +1,4 @@
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import {
   AlertCircle,
   Camera,
@@ -29,10 +29,13 @@ import {
   type PassportQrResolution,
   type PublicDevicePassport,
 } from "../data/passport-adapter";
+import { loadTestnetPassport } from "../data/sui-passport";
+import { useRepairerAuthorization } from "../hooks/use-repairer-authorization";
 
 type CameraStatus = "idle" | "requesting" | "scanning" | "resolved" | "error";
 
 type QrPassportScannerProps = {
+  passport: PublicDevicePassport;
   onPassportResolved: (passport: PublicDevicePassport) => void;
 };
 
@@ -58,10 +61,18 @@ function cameraErrorMessage(error: unknown) {
   return "The camera could not be started. You can still paste the QR content below.";
 }
 
-function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
+function QrPassportScanner({
+  passport,
+  onPassportResolved,
+}: QrPassportScannerProps) {
+  const client = useCurrentClient();
   const currentAccount = useCurrentAccount();
   const walletAddress = currentAccount?.address ?? null;
-  const authorization = repairWorkspaceAdapter.getAuthorization(walletAddress);
+  const authorizationQuery = useRepairerAuthorization(walletAddress);
+  const authorization = repairWorkspaceAdapter.getAuthorization(
+    walletAddress,
+    authorizationQuery.data ?? (authorizationQuery.isError ? false : undefined),
+  );
   const isAuthorizedRepairer = authorization.status === "authorized";
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -83,19 +94,47 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
   }, []);
 
   const resolvePayload = useCallback(
-    (payload: string) => {
-      const nextResolution = qrPassportAdapter.resolve(payload);
+    async (payload: string) => {
+      const deviceId = qrPassportAdapter.readDeviceId(payload);
 
       stopCamera();
-      setResolution(nextResolution);
       setCameraMessage(null);
-      setCameraStatus("resolved");
 
-      if (nextResolution.status === "matched") {
-        onPassportResolved(nextResolution.passport);
+      if (!deviceId) {
+        setResolution({
+          status: "invalid",
+          message:
+            "This QR code does not contain a supported Sui passport object ID.",
+        });
+        setCameraStatus("resolved");
+        return;
+      }
+
+      try {
+        const resolvedPassport =
+          deviceId.toLowerCase() === passport.id.toLowerCase()
+            ? passport
+            : await loadTestnetPassport(client, deviceId);
+        const nextResolution: PassportQrResolution = {
+          status: "matched",
+          deviceId: resolvedPassport.id,
+          passport: resolvedPassport,
+        };
+
+        setResolution(nextResolution);
+        setCameraStatus("resolved");
+        onPassportResolved(resolvedPassport);
+      } catch {
+        setResolution({
+          status: "not-found",
+          deviceId,
+          message:
+            "No compatible ReDevice passport was found for this object ID on Sui Testnet.",
+        });
+        setCameraStatus("resolved");
       }
     },
-    [onPassportResolved, stopCamera],
+    [client, onPassportResolved, passport, stopCamera],
   );
 
   const startCamera = useCallback(async () => {
@@ -186,7 +225,7 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
           });
 
           if (code?.data) {
-            resolvePayload(code.data);
+            void resolvePayload(code.data);
             return;
           }
         }
@@ -206,12 +245,15 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
     event.preventDefault();
 
     if (pastedPayload.trim()) {
-      resolvePayload(pastedPayload);
+      void resolvePayload(pastedPayload);
     }
   };
 
   const matchedPassport =
     resolution?.status === "matched" ? resolution.passport : null;
+  const hasRepairerDetails = Boolean(
+    matchedPassport?.repairHistory.some((record) => record.repairerDetails),
+  );
 
   const accessLabel = isAuthorizedRepairer
     ? "Authorized repairer"
@@ -220,7 +262,7 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
       : "Public viewer";
 
   const accessExplanation = isAuthorizedRepairer
-    ? "This wallet may view the repairer-only technical fields returned by the future contract integration."
+    ? "The shared Testnet RepairerCap is active and matches this wallet."
     : walletAddress
       ? authorization.explanation
       : "No wallet is required to scan a device and read its public passport.";
@@ -238,7 +280,7 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
               Find a device
             </p>
             <span className="rounded-full border border-line bg-canvas px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
-              Frontend preview
+              Live Testnet
             </span>
           </div>
 
@@ -303,7 +345,7 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
                   className="min-h-12 w-full rounded-xl border border-line bg-surface py-2 pl-10 pr-3.5 text-sm text-ink"
                   value={pastedPayload}
                   onChange={(event) => setPastedPayload(event.target.value)}
-                  placeholder="RDP-2026-0148"
+                  placeholder="0xc1e9…46666"
                   maxLength={2048}
                   autoComplete="off"
                   spellCheck={false}
@@ -323,10 +365,12 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
           <button
             className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl px-1 text-xs font-semibold text-brand transition-colors hover:text-ink"
             type="button"
-            onClick={() => resolvePayload(qrPassportAdapter.getSamplePayload())}
+            onClick={() =>
+              void resolvePayload(qrPassportAdapter.getSamplePayload())
+            }
           >
             <QrCode aria-hidden="true" className="size-4" />
-            Open sample passport without a camera
+            Open live Testnet passport without a camera
           </button>
         </div>
 
@@ -566,8 +610,8 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
                     Technical service data unlocked
                   </h4>
                   <p className="mt-1 text-xs leading-5 text-ink/70">
-                    Sample fields for frontend review. Real data must come from
-                    the authorized contract/API response.
+                    This wallet matches the active RepairerCap stored on Sui
+                    Testnet.
                   </p>
                 </div>
               </div>
@@ -635,6 +679,15 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
                       </article>
                     ),
                 )}
+
+                {!hasRepairerDetails && (
+                  <p className="rounded-xl border border-success/20 bg-surface p-4 text-xs leading-5 text-ink/75">
+                    The current Move object stores the public attestation,
+                    repairer address, status transition, battery health, notes,
+                    and evidence reference. No private work-order fields are
+                    stored on-chain.
+                  </p>
+                )}
               </div>
             </div>
           ) : (
@@ -647,10 +700,9 @@ function QrPassportScanner({ onPassportResolved }: QrPassportScannerProps) {
                   Repairer-only details are locked
                 </p>
                 <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted">
-                  Public device information is available now. A future wallet
-                  authorization check will unlock work-order references,
-                  diagnostics, parts, labor time, and technician notes only for
-                  approved repairers.
+                  Public device information is available now. Connect the
+                  authorized Sui Testnet wallet to unlock the repairer
+                  workspace.
                 </p>
                 <a
                   className="mt-3 inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-brand hover:text-ink"

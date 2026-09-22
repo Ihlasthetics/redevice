@@ -151,3 +151,8 @@ ReDevice is an independent hackathon prototype. It is not connected to the offic
 The frontend began from Mysten Labs' `@mysten/create-dapp@0.7.11` `react-e2e-counter` starter. Counter-specific code was removed. The retained setup includes React, TypeScript, Vite, Tailwind CSS, Mysten dApp Kit, Sui code-generation configuration, and reusable UI primitives.
 
 See [AI_USAGE.md](AI_USAGE.md) for the AI-assistance disclosure and [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
+
+## Project status
+
+ReDevice is an ETHGlobal Lisbon 2026 prototype running on Sui Testnet. Device registration, capability-based authorization, duplicate-registration protection, public passport access and repair attestations were implemented and tested during the hackathon. It is not production-ready, and some wallet, testnet and external-service conditions may affect individual demonstration flows.
+

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSubmissionGuard,
   retryConfirmedRefresh,
@@ -6,6 +6,10 @@ import {
 } from "./transaction-flow";
 
 describe("confirmed write feedback", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("does not make a success claim after signature cancellation", async () => {
     const outcome = await runConfirmedWrite({
       execute: vi.fn().mockRejectedValue(new Error("User rejected request")),
@@ -28,6 +32,74 @@ describe("confirmed write feedback", () => {
       status: "confirmed-refresh-failed",
       digest: "known-digest",
     });
+  });
+
+  it("publishes the confirmed digest before readback settles", async () => {
+    let finishRefresh!: () => void;
+    const refresh = new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const onConfirmed = vi.fn();
+    const outcomePromise = runConfirmedWrite({
+      execute: vi.fn().mockResolvedValue({
+        Transaction: { digest: "known-digest" },
+      }),
+      refresh: () => refresh,
+      onConfirmed,
+    });
+
+    await vi.waitFor(() => {
+      expect(onConfirmed).toHaveBeenCalledWith("known-digest");
+    });
+    finishRefresh();
+
+    await expect(outcomePromise).resolves.toEqual({
+      status: "confirmed",
+      digest: "known-digest",
+    });
+  });
+
+  it("bounds readback time and retains the confirmed digest", async () => {
+    vi.useFakeTimers();
+    const outcomePromise = runConfirmedWrite({
+      execute: vi.fn().mockResolvedValue({
+        Transaction: { digest: "known-digest" },
+      }),
+      refresh: () => new Promise(() => undefined),
+      refreshTimeoutMs: 2_000,
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(outcomePromise).resolves.toMatchObject({
+      status: "confirmed-refresh-failed",
+      digest: "known-digest",
+      error: expect.stringContaining("timed out"),
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears the readback timer when an operation is abandoned", async () => {
+    vi.useFakeTimers();
+    const abortController = new AbortController();
+    const outcomePromise = runConfirmedWrite({
+      execute: vi.fn().mockResolvedValue({
+        Transaction: { digest: "known-digest" },
+      }),
+      refresh: () => new Promise(() => undefined),
+      signal: abortController.signal,
+    });
+
+    await vi.waitFor(() => {
+      expect(vi.getTimerCount()).toBe(1);
+    });
+    abortController.abort();
+
+    await expect(outcomePromise).resolves.toMatchObject({
+      status: "confirmed-refresh-failed",
+      digest: "known-digest",
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("reports a confirmed ledger failure separately and keeps its hash", async () => {

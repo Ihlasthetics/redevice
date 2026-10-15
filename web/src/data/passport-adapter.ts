@@ -136,6 +136,7 @@ export type TransactionStatus =
   | "ready"
   | "awaiting-signature"
   | "submitting"
+  | "confirmed-refreshing"
   | "confirmed"
   | "confirmed-refresh-failed"
   | "cancelled"
@@ -420,6 +421,16 @@ const transactionStates: TransactionStatusDefinition[] = [
     tone: "pending",
   },
   {
+    id: "confirmed-refreshing",
+    shortLabel: "Refreshing",
+    label: "Transaction confirmed; refreshing passport",
+    description:
+      "Sui confirmed the repair transaction. The updated passport readback is still in progress.",
+    nextStep:
+      "Keep this page open; the confirmed transaction link is already available.",
+    tone: "success",
+  },
+  {
     id: "confirmed",
     shortLabel: "Confirmed",
     label: "Repair record confirmed",
@@ -431,7 +442,7 @@ const transactionStates: TransactionStatusDefinition[] = [
   {
     id: "confirmed-refresh-failed",
     shortLabel: "Refresh needed",
-    label: "Transaction confirmed; refresh failed",
+    label: "Transaction confirmed; refresh unavailable",
     description:
       "Sui confirmed the repair transaction, but the updated passport could not be read back.",
     nextStep:

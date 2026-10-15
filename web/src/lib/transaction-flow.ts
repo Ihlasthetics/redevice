@@ -22,6 +22,8 @@ export type ConfirmedWriteOutcome =
   | { status: "failed"; digest: string | null; error: string }
   | { status: "unknown"; digest: null; error: string };
 
+export const CONFIRMED_READBACK_TIMEOUT_MS = 10_000;
+
 export function isWalletCancellation(error: unknown) {
   return (
     error instanceof Error &&
@@ -33,12 +35,62 @@ function messageFrom(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function waitForRefresh(
+  refresh: () => Promise<unknown> | unknown,
+  timeoutMs: number,
+  signal?: AbortSignal,
+) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("The passport refresh was interrupted."));
+      return;
+    }
+
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", handleAbort);
+      callback();
+    };
+    const handleAbort = () =>
+      finish(() => reject(new Error("The passport refresh was interrupted.")));
+    const timeoutId = setTimeout(() => {
+      finish(() =>
+        reject(
+          new Error(
+            `The passport refresh timed out after ${Math.ceil(timeoutMs / 1_000)} seconds.`,
+          ),
+        ),
+      );
+    }, timeoutMs);
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    Promise.resolve()
+      .then(refresh)
+      .then(
+        () => finish(resolve),
+        (error) => finish(() => reject(error)),
+      );
+  });
+}
+
 export async function runConfirmedWrite({
   execute,
   refresh,
+  onConfirmed,
+  refreshTimeoutMs = CONFIRMED_READBACK_TIMEOUT_MS,
+  signal,
 }: {
   execute: () => Promise<SuiExecutionResult>;
   refresh: () => Promise<unknown> | unknown;
+  onConfirmed?: (digest: string) => void;
+  refreshTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<ConfirmedWriteOutcome> {
   try {
     const result = await execute();
@@ -54,9 +106,10 @@ export async function runConfirmedWrite({
     }
 
     const digest = result.Transaction.digest;
+    onConfirmed?.(digest);
 
     try {
-      await refresh();
+      await waitForRefresh(refresh, refreshTimeoutMs, signal);
       return { status: "confirmed", digest };
     } catch (error) {
       return {
@@ -106,6 +159,10 @@ export function createSubmissionGuard() {
 
 export async function retryConfirmedRefresh(
   refresh: () => Promise<unknown> | unknown,
+  {
+    timeoutMs = CONFIRMED_READBACK_TIMEOUT_MS,
+    signal,
+  }: { timeoutMs?: number; signal?: AbortSignal } = {},
 ) {
-  await refresh();
+  await waitForRefresh(refresh, timeoutMs, signal);
 }

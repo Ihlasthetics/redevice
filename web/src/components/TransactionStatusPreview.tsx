@@ -50,6 +50,7 @@ function StatusIcon({ status }: { status: TransactionStatus }) {
     case "awaiting-signature":
       return <WalletCards aria-hidden="true" className={iconClass} />;
     case "submitting":
+    case "confirmed-refreshing":
       return (
         <LoaderCircle
           aria-hidden="true"

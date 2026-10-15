@@ -66,6 +66,8 @@ function RepairWorkspace({
   );
   const [transactionError, setTransactionError] = useState<string | null>(null);
   const submissionGuard = useRef(createSubmissionGuard());
+  const operationVersion = useRef(0);
+  const readbackAbortController = useRef<AbortController | null>(null);
 
   const isLivePassport = passport.source.kind === "live";
   const demoLabel =
@@ -73,11 +75,22 @@ function RepairWorkspace({
   const isAuthorized = isLivePassport && authorization.status === "authorized";
   const isBusy =
     transactionStatus === "awaiting-signature" ||
-    transactionStatus === "submitting";
+    transactionStatus === "submitting" ||
+    transactionStatus === "confirmed-refreshing";
 
   useEffect(() => {
+    operationVersion.current += 1;
+    readbackAbortController.current?.abort();
+    readbackAbortController.current = null;
     setTransactionStatus("ready");
+    setTransactionDigest(null);
     setTransactionError(null);
+
+    return () => {
+      operationVersion.current += 1;
+      readbackAbortController.current?.abort();
+      readbackAbortController.current = null;
+    };
   }, [authorization.status, walletAddress]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -119,6 +132,13 @@ function RepairWorkspace({
 
     setTransactionDigest(null);
     setTransactionError(null);
+    const operationId = ++operationVersion.current;
+    readbackAbortController.current?.abort();
+    const abortController = new AbortController();
+    readbackAbortController.current = abortController;
+    const isCurrentOperation = () =>
+      operationVersion.current === operationId &&
+      readbackAbortController.current === abortController;
 
     try {
       const transaction = new Transaction();
@@ -141,27 +161,64 @@ function RepairWorkspace({
       const outcome = await runConfirmedWrite({
         execute: () => dAppKit.signAndExecuteTransaction({ transaction }),
         refresh: onRepairConfirmed,
+        onConfirmed: (digest) => {
+          if (!isCurrentOperation()) {
+            return;
+          }
+
+          setTransactionStatus("confirmed-refreshing");
+          setTransactionDigest(digest);
+          setTransactionError(null);
+        },
+        signal: abortController.signal,
       });
 
-      setTransactionStatus(outcome.status);
-      setTransactionDigest(outcome.digest);
-      setTransactionError("error" in outcome ? outcome.error : null);
+      if (isCurrentOperation()) {
+        setTransactionStatus(outcome.status);
+        setTransactionDigest(outcome.digest);
+        setTransactionError("error" in outcome ? outcome.error : null);
+      }
     } finally {
+      if (readbackAbortController.current === abortController) {
+        readbackAbortController.current = null;
+      }
       submissionGuard.current.finish();
     }
   }
 
   async function handleRefreshRetry() {
+    const operationId = ++operationVersion.current;
+    readbackAbortController.current?.abort();
+    const abortController = new AbortController();
+    readbackAbortController.current = abortController;
+    const isCurrentOperation = () =>
+      operationVersion.current === operationId &&
+      readbackAbortController.current === abortController;
+
+    setTransactionStatus("confirmed-refreshing");
+    setTransactionError(null);
+
     try {
-      await retryConfirmedRefresh(onRepairConfirmed);
-      setTransactionStatus("confirmed");
-      setTransactionError(null);
+      await retryConfirmedRefresh(onRepairConfirmed, {
+        signal: abortController.signal,
+      });
+      if (isCurrentOperation()) {
+        setTransactionStatus("confirmed");
+        setTransactionError(null);
+      }
     } catch (error) {
-      setTransactionError(
-        error instanceof Error
-          ? error.message
-          : "The passport refresh is still unavailable.",
-      );
+      if (isCurrentOperation()) {
+        setTransactionStatus("confirmed-refresh-failed");
+        setTransactionError(
+          error instanceof Error
+            ? error.message
+            : "The passport refresh is still unavailable.",
+        );
+      }
+    } finally {
+      if (readbackAbortController.current === abortController) {
+        readbackAbortController.current = null;
+      }
     }
   }
 
@@ -505,13 +562,15 @@ function RepairWorkspace({
                   className={`size-4 ${isBusy ? "animate-spin" : ""}`}
                 />
               )}
-              {isBusy
-                ? "Waiting for Sui"
-                : transactionStatus === "confirmed"
-                  ? "Submit another repair"
-                  : isAuthorized
-                    ? "Sign and add repair record"
-                    : "Authorized wallet required"}
+              {transactionStatus === "confirmed-refreshing"
+                ? "Refreshing passport"
+                : isBusy
+                  ? "Waiting for Sui"
+                  : transactionStatus === "confirmed"
+                    ? "Submit another repair"
+                    : isAuthorized
+                      ? "Sign and add repair record"
+                      : "Authorized wallet required"}
             </button>
           </form>
         </div>

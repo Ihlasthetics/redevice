@@ -210,6 +210,35 @@ dependency-audit, local-server, browser, mobile-layout, and generated-PDF checks
 were performed by Codex. No wallet was connected and no transaction was signed.
 Human review and real authorized-wallet/mobile-camera checks remain pending.
 
+## PR #8 review follow-up
+
+Date: 15 October 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The team requested two narrow review fixes on
+the existing pre-hackathon branch: expose a confirmed repair digest before a
+bounded passport readback completes, and make authorization tests independent
+of production or developer-local Vite configuration. Move contracts,
+deployment IDs, wallet configuration, and unrelated migration work remained
+out of scope.
+
+Files assisted:
+
+- `web/src/components/RepairWorkspace.tsx` and its component tests
+- `web/src/components/TransactionStatusPreview.tsx`
+- `web/src/data/passport-adapter.ts`
+- `web/src/data/sui-passport.test.ts`
+- `web/src/lib/transaction-flow.ts` and its tests
+- `docs/PRE_HACKATHON_FIXES.md`
+- `AI_USAGE.md`
+
+Human verification: Codex reproduced both reported failures before changing
+the implementation. Mocked regression tests, the full test suite, typecheck,
+production build, post-build format check, synthetic environment run, and npm
+audit passed. No wallet was connected and no blockchain transaction was signed;
+live-wallet and end-to-end Sui verification remain pending.
+
 ## QR passport scanner
 
 Date: 25 July 2026

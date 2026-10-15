@@ -64,6 +64,29 @@ or critical findings; there are no open dependency exceptions in this lockfile.
   was signed. Authorized registration/repair states and real phone-camera
   behavior therefore remain manual checks.
 
+## PR #8 review follow-up — 15 October 2026
+
+Two independently reproduced review findings were fixed without changing the
+Sui contract or deployment configuration:
+
+- A confirmed repair digest is now published before passport readback begins.
+  The UI keeps the explorer link visible while refreshing, limits each readback
+  attempt to 10 seconds, preserves confirmed status on rejection or timeout,
+  and offers a read-only retry. Operation tokens and abortable timeout cleanup
+  prevent abandoned or late readbacks from updating a newer view.
+- Authorization tests now stub explicit package and capability IDs before
+  dynamically importing the configuration-dependent modules. They cover equal
+  registrar/admin IDs, distinct active ownership, other/inactive ownership,
+  RPC failure, and wrong capability type without depending on checked-in or
+  developer-local environment values.
+
+The follow-up suite passed with 7 files and 31 tests under both an environment
+with no relevant overrides and a synthetic environment containing distinct
+valid registrar/admin IDs. Type checking, production build, post-build format
+checking, and the high-severity dependency audit also passed. All transaction
+tests used mocked wallet/RPC boundaries; no wallet was connected and no
+blockchain transaction was submitted.
+
 ## Partner setup
 
 ```bash

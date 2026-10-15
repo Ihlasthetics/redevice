@@ -25,6 +25,7 @@ import {
 } from "react";
 import {
   qrPassportAdapter,
+  passportAdapter,
   repairWorkspaceAdapter,
   type PassportQrResolution,
   type PublicDevicePassport,
@@ -35,8 +36,8 @@ import { useRepairerAuthorization } from "../hooks/use-repairer-authorization";
 type CameraStatus = "idle" | "requesting" | "scanning" | "resolved" | "error";
 
 type QrPassportScannerProps = {
-  passport: PublicDevicePassport;
   onPassportResolved: (passport: PublicDevicePassport) => void;
+  onDemoRequested: (passport: PublicDevicePassport) => void;
 };
 
 function formatAddress(address: string) {
@@ -62,8 +63,8 @@ function cameraErrorMessage(error: unknown) {
 }
 
 function QrPassportScanner({
-  passport,
   onPassportResolved,
+  onDemoRequested,
 }: QrPassportScannerProps) {
   const client = useCurrentClient();
   const currentAccount = useCurrentAccount();
@@ -71,7 +72,8 @@ function QrPassportScanner({
   const authorizationQuery = useRepairerAuthorization(walletAddress);
   const authorization = repairWorkspaceAdapter.getAuthorization(
     walletAddress,
-    authorizationQuery.data ?? (authorizationQuery.isError ? false : undefined),
+    authorizationQuery.data,
+    authorizationQuery.error,
   );
   const isAuthorizedRepairer = authorization.status === "authorized";
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -111,10 +113,7 @@ function QrPassportScanner({
       }
 
       try {
-        const resolvedPassport =
-          deviceId.toLowerCase() === passport.id.toLowerCase()
-            ? passport
-            : await loadTestnetPassport(client, deviceId);
+        const resolvedPassport = await loadTestnetPassport(client, deviceId);
         const nextResolution: PassportQrResolution = {
           status: "matched",
           deviceId: resolvedPassport.id,
@@ -124,18 +123,34 @@ function QrPassportScanner({
         setResolution(nextResolution);
         setCameraStatus("resolved");
         onPassportResolved(resolvedPassport);
-      } catch {
+      } catch (error) {
         setResolution({
           status: "not-found",
           deviceId,
           message:
-            "No compatible ReDevice passport was found for this object ID on Sui Testnet.",
+            error instanceof Error
+              ? error.message
+              : "No compatible ReDevice passport was found for this object ID on Sui Testnet.",
         });
         setCameraStatus("resolved");
       }
     },
-    [client, onPassportResolved, passport, stopCamera],
+    [client, onPassportResolved, stopCamera],
   );
+
+  const openDemo = useCallback(() => {
+    const demoPassport = passportAdapter.getPublicPassport();
+
+    stopCamera();
+    setCameraMessage(null);
+    setResolution({
+      status: "matched",
+      deviceId: demoPassport.id,
+      passport: demoPassport,
+    });
+    setCameraStatus("resolved");
+    onDemoRequested(demoPassport);
+  }, [onDemoRequested, stopCamera]);
 
   const startCamera = useCallback(async () => {
     stopCamera();
@@ -280,7 +295,7 @@ function QrPassportScanner({
               Find a device
             </p>
             <span className="rounded-full border border-line bg-canvas px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
-              Live Testnet
+              Public lookup
             </span>
           </div>
 
@@ -365,12 +380,10 @@ function QrPassportScanner({
           <button
             className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl px-1 text-xs font-semibold text-brand transition-colors hover:text-ink"
             type="button"
-            onClick={() =>
-              void resolvePayload(qrPassportAdapter.getSamplePayload())
-            }
+            onClick={openDemo}
           >
             <QrCode aria-hidden="true" className="size-4" />
-            Open live Testnet passport without a camera
+            Open demo data without a camera
           </button>
         </div>
 
@@ -471,7 +484,9 @@ function QrPassportScanner({
                   <div>
                     <p className="text-sm font-semibold">
                       {resolution.status === "matched"
-                        ? "Passport found"
+                        ? resolution.passport.source.kind === "fixture"
+                          ? "Demo passport opened"
+                          : "Passport found"
                         : "Passport unavailable"}
                     </p>
                     <p className="mt-1 text-xs leading-5 text-canvas/70">
@@ -543,7 +558,9 @@ function QrPassportScanner({
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-success">
-                Scanned public passport
+                {matchedPassport.source.kind === "fixture"
+                  ? "Demo passport"
+                  : "Scanned public passport"}
               </p>
               <h3 className="mt-2 text-2xl font-semibold tracking-[-0.025em]">
                 {matchedPassport.manufacturer} {matchedPassport.model}
@@ -551,6 +568,11 @@ function QrPassportScanner({
               <p className="mt-1 font-mono text-xs text-muted">
                 {matchedPassport.id}
               </p>
+              {matchedPassport.source.kind === "fixture" && (
+                <p className="mt-2 text-sm font-semibold text-amber-800">
+                  {matchedPassport.source.label}
+                </p>
+              )}
             </div>
             <a
               className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-line bg-surface px-4 text-sm font-semibold transition-colors hover:border-brand hover:text-brand"
@@ -700,9 +722,9 @@ function QrPassportScanner({
                   Repairer-only details are locked
                 </p>
                 <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted">
-                  Public device information is available now. Connect the
-                  authorized Sui Testnet wallet to unlock the repairer
-                  workspace.
+                  {matchedPassport.source.kind === "fixture"
+                    ? "Demo data has no repairer-only or transaction actions. Load a live compatible passport first."
+                    : "Public device information is available now. Connect the authorized Sui Testnet wallet to unlock the repairer workspace."}
                 </p>
                 <a
                   className="mt-3 inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-brand hover:text-ink"

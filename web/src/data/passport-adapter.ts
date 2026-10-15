@@ -1,4 +1,21 @@
-import { TESTNET_PASSPORT_ID, transactionExplorerUrl } from "../constants";
+import {
+  TESTNET_PACKAGE_ID,
+  TESTNET_PASSPORT_ID,
+  transactionExplorerUrl,
+} from "../constants";
+
+export type PassportDataErrorCode =
+  "invalid-config" | "missing-or-incompatible" | "rpc-unavailable";
+
+export class PassportDataError extends Error {
+  readonly code: PassportDataErrorCode;
+
+  constructor(code: PassportDataErrorCode, message: string) {
+    super(message);
+    this.name = "PassportDataError";
+    this.code = code;
+  }
+}
 
 export type LifecycleCondition =
   "Inspected" | "Refurbished" | "In service" | "Retired";
@@ -60,6 +77,17 @@ export type PublicDevicePassport = {
   };
   verification: VerificationLevel;
   repairHistory: RepairRecord[];
+  source:
+    | {
+        kind: "live";
+        network: "Sui Testnet";
+        objectType: string;
+        fetchedAt: string;
+      }
+    | {
+        kind: "fixture";
+        label: "Demo data — not a live blockchain record.";
+      };
 };
 
 export type RepairerAuthorization =
@@ -82,6 +110,16 @@ export type RepairerAuthorization =
       status: "unauthorized";
       label: "Wallet lacks permission";
       explanation: string;
+    }
+  | {
+      status: "invalid-config";
+      label: "Authorization configuration error";
+      explanation: string;
+    }
+  | {
+      status: "unavailable";
+      label: "Authorization check unavailable";
+      explanation: string;
     };
 
 export type RepairWorkspaceConfig = {
@@ -96,11 +134,14 @@ export type RepairWorkspaceConfig = {
 
 export type TransactionStatus =
   | "ready"
-  | "uploading"
   | "awaiting-signature"
   | "submitting"
+  | "confirmed-refreshing"
   | "confirmed"
-  | "rejected";
+  | "confirmed-refresh-failed"
+  | "cancelled"
+  | "failed"
+  | "unknown";
 
 export type TransactionStatusDefinition = {
   id: TransactionStatus;
@@ -236,8 +277,23 @@ function maskSerial(serial: string) {
 }
 
 function evidenceLink(reference: string): RepairRecordLink {
-  if (/^https?:\/\//i.test(reference)) {
-    return { label: "Public evidence", url: reference };
+  if (/^demo-evidence:/i.test(reference)) {
+    return {
+      label: "Historical demo placeholder · not retrievable",
+      url: null,
+    };
+  }
+
+  if (reference) {
+    try {
+      const url = new URL(reference);
+
+      if (url.protocol === "https:" || url.protocol === "http:") {
+        return { label: "Public evidence", url: url.toString() };
+      }
+    } catch {
+      // Historical values may be opaque references rather than URLs.
+    }
   }
 
   return {
@@ -280,9 +336,13 @@ const fallbackPassport: PublicDevicePassport = {
     displayDate: "25 July 2026",
   },
   verification: {
-    label: "Testnet record",
+    label: "Demo fixture",
     explanation:
-      "This fallback mirrors the published ReDevice Testnet passport while the live RPC reconnects.",
+      "This static fixture demonstrates the interface and is not evidence of a blockchain read.",
+  },
+  source: {
+    kind: "fixture",
+    label: "Demo data — not a live blockchain record.",
   },
   repairHistory: [
     {
@@ -300,14 +360,12 @@ const fallbackPassport: PublicDevicePassport = {
       },
       batteryHealth: 96,
       evidence: {
-        label: "Evidence ref · battery-diagnostic-001",
+        label: "Historical demo placeholder · not retrievable",
         url: null,
       },
       transaction: {
-        label: "View on SuiVision",
-        url: transactionExplorerUrl(
-          "CLe1iBPyaCqHwrwbJnPFwDHiD1CU3AfuAZpZ2WggpyeZ",
-        ),
+        label: "Demo transaction placeholder",
+        url: null,
       },
     },
   ],
@@ -329,7 +387,7 @@ const repairWorkspace: RepairWorkspaceConfig = {
   privacyWarning:
     "This transaction is public. Never include full serial numbers, invoices, customer names, addresses, private documents, recovery phrases, or private keys.",
   integrationNotice:
-    "The repair details are written to Sui Testnet. Walrus upload is not connected in this build, so a selected file creates only a public demo evidence reference; the file itself is not uploaded.",
+    "Evidence upload is unavailable in this build. Repair submissions record an explicit empty evidence value; no file or filename is uploaded or published.",
 };
 
 const transactionStates: TransactionStatusDefinition[] = [
@@ -342,15 +400,6 @@ const transactionStates: TransactionStatusDefinition[] = [
     nextStep:
       "When authorization is confirmed, the submit button becomes active.",
     tone: "neutral",
-  },
-  {
-    id: "uploading",
-    shortLabel: "Evidence",
-    label: "Preparing evidence reference",
-    description:
-      "The frontend is preparing a demo evidence reference. No file bytes are uploaded.",
-    nextStep: "The wallet signature request comes next.",
-    tone: "pending",
   },
   {
     id: "awaiting-signature",
@@ -372,6 +421,16 @@ const transactionStates: TransactionStatusDefinition[] = [
     tone: "pending",
   },
   {
+    id: "confirmed-refreshing",
+    shortLabel: "Refreshing",
+    label: "Transaction confirmed; refreshing passport",
+    description:
+      "Sui confirmed the repair transaction. The updated passport readback is still in progress.",
+    nextStep:
+      "Keep this page open; the confirmed transaction link is already available.",
+    tone: "success",
+  },
+  {
     id: "confirmed",
     shortLabel: "Confirmed",
     label: "Repair record confirmed",
@@ -381,13 +440,43 @@ const transactionStates: TransactionStatusDefinition[] = [
     tone: "success",
   },
   {
-    id: "rejected",
-    shortLabel: "Rejected",
-    label: "Transaction not submitted",
+    id: "confirmed-refresh-failed",
+    shortLabel: "Refresh needed",
+    label: "Transaction confirmed; refresh unavailable",
     description:
-      "The wallet lacks permission, the signature was rejected, or Sui returned an error.",
+      "Sui confirmed the repair transaction, but the updated passport could not be read back.",
     nextStep:
-      "Read the message below, then connect the authorized Testnet wallet and retry.",
+      "Keep the transaction link and retry only the passport refresh when the RPC is available.",
+    tone: "success",
+  },
+  {
+    id: "cancelled",
+    shortLabel: "Cancelled",
+    label: "Signature cancelled",
+    description:
+      "The wallet request was cancelled, so the interface makes no success claim.",
+    nextStep:
+      "Review the transaction details and submit again only if you still intend to publish them.",
+    tone: "neutral",
+  },
+  {
+    id: "failed",
+    shortLabel: "Failed",
+    label: "Ledger execution failed",
+    description:
+      "Sui returned a confirmed execution failure. No successful repair update was recorded.",
+    nextStep:
+      "Open the transaction when a digest is available and review the error.",
+    tone: "danger",
+  },
+  {
+    id: "unknown",
+    shortLabel: "Unknown",
+    label: "Transaction status unknown",
+    description:
+      "The wallet or network stopped responding before the application received a definitive result.",
+    nextStep:
+      "Check the wallet activity and explorer before attempting another submission.",
     tone: "danger",
   },
 ];
@@ -398,6 +487,18 @@ export const passportAdapter = {
   },
 
   fromSuiObject(object: SuiObjectJson): PublicDevicePassport {
+    const expectedType = `${TESTNET_PACKAGE_ID}::redevice::DevicePassport`;
+
+    if (
+      typeof object.type !== "string" ||
+      object.type.toLowerCase() !== expectedType.toLowerCase()
+    ) {
+      throw new PassportDataError(
+        "missing-or-incompatible",
+        `The selected object is ${object.type || "an unknown type"}, not the configured ${expectedType}. Check the Testnet package and passport IDs.`,
+      );
+    }
+
     const fields = asRecord(object.json);
     const model = requiredString(fields, "model");
     const manufacturer = requiredString(fields, "manufacturer");
@@ -428,6 +529,12 @@ export const passportAdapter = {
             : "On-chain record",
         explanation:
           "This passport and its service history were read directly from the published ReDevice package on Sui Testnet.",
+      },
+      source: {
+        kind: "live",
+        network: "Sui Testnet",
+        objectType: object.type,
+        fetchedAt: new Date().toISOString(),
       },
       repairHistory: repairs
         .map((repair, index): RepairRecord => {
@@ -472,6 +579,11 @@ function readDeviceIdFromQrPayload(payload: string): string | null {
     return null;
   }
 
+  const normalizeObjectId = (candidate: unknown) =>
+    typeof candidate === "string" && /^0x[a-f0-9]{64}$/i.test(candidate.trim())
+      ? candidate.trim()
+      : null;
+
   try {
     const parsed = JSON.parse(value) as unknown;
 
@@ -480,23 +592,37 @@ function readDeviceIdFromQrPayload(payload: string): string | null {
       const candidate =
         record.deviceId ?? record.passportId ?? record.device_id ?? record.id;
 
-      if (typeof candidate === "string") {
-        return candidate.trim();
+      const objectId = normalizeObjectId(candidate);
+
+      if (objectId) {
+        return objectId;
       }
     }
   } catch {
     // A QR payload may be a URL or a plain object ID instead of JSON.
   }
 
+  const reDeviceUri = value.match(/^redevice:(?:passport:)?(.+)$/i);
+  if (reDeviceUri) {
+    return normalizeObjectId(reDeviceUri[1]);
+  }
+
   try {
     const url = new URL(value);
+
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return null;
+    }
+
     const queryId =
       url.searchParams.get("device") ??
       url.searchParams.get("deviceId") ??
       url.searchParams.get("passport");
 
-    if (queryId) {
-      return queryId.trim();
+    const queryObjectId = normalizeObjectId(queryId);
+
+    if (queryObjectId) {
+      return queryObjectId;
     }
 
     const pathId = url.pathname
@@ -512,10 +638,7 @@ function readDeviceIdFromQrPayload(payload: string): string | null {
     // The payload may be a ReDevice URI or a plain Sui object ID.
   }
 
-  const reDeviceUri = value.match(/^redevice:(?:passport:)?(.+)$/i);
-  const candidate = reDeviceUri?.[1] ?? value;
-
-  return /^0x[a-f0-9]{64}$/i.test(candidate) ? candidate.trim() : null;
+  return normalizeObjectId(value);
 }
 
 export const qrPassportAdapter = {
@@ -566,6 +689,7 @@ export const repairWorkspaceAdapter = {
   getAuthorization(
     walletAddress: string | null,
     authorizationResult?: boolean,
+    authorizationError?: unknown,
   ): RepairerAuthorization {
     if (!walletAddress) {
       return {
@@ -573,6 +697,30 @@ export const repairWorkspaceAdapter = {
         label: "Wallet not connected",
         explanation:
           "Connect the Sui Testnet wallet that owns the repairer authorization.",
+      };
+    }
+
+    if (authorizationError instanceof PassportDataError) {
+      return authorizationError.code === "invalid-config"
+        ? {
+            status: "invalid-config",
+            label: "Authorization configuration error",
+            explanation: authorizationError.message,
+          }
+        : {
+            status: "unavailable",
+            label: "Authorization check unavailable",
+            explanation:
+              "Sui Testnet could not be reached. Permission has not been denied; signing remains disabled until the check succeeds.",
+          };
+    }
+
+    if (authorizationError) {
+      return {
+        status: "unavailable",
+        label: "Authorization check unavailable",
+        explanation:
+          "Sui Testnet could not be reached. Permission has not been denied; signing remains disabled until the check succeeds.",
       };
     }
 

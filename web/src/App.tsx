@@ -22,6 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { objectExplorerUrl } from "./constants";
 import {
+  PassportDataError,
   passportAdapter,
   type RepairRecordLink,
 } from "./data/passport-adapter";
@@ -66,19 +67,23 @@ function RecordLink({
 
 function App() {
   const client = useCurrentClient();
+  const requestedPassportId = new URLSearchParams(window.location.search).get(
+    "passport",
+  );
   const [passport, setPassport] = useState(() =>
     passportAdapter.getPublicPassport(),
   );
   const [hasResolvedPassport, setHasResolvedPassport] = useState(false);
-  const [selectedPassportId, setSelectedPassportId] = useState(() => {
-    const requestedPassportId = new URLSearchParams(window.location.search).get(
-      "passport",
-    );
-
-    return requestedPassportId && /^0x[0-9a-f]{64}$/i.test(requestedPassportId)
+  const [routeError, setRouteError] = useState<string | null>(() =>
+    requestedPassportId && !/^0x[0-9a-f]{64}$/i.test(requestedPassportId)
+      ? "The passport link is invalid. Use a 66-character Sui object ID beginning with 0x, or scan a ReDevice QR code."
+      : null,
+  );
+  const [selectedPassportId, setSelectedPassportId] = useState<string | null>(
+    requestedPassportId && /^0x[0-9a-f]{64}$/i.test(requestedPassportId)
       ? requestedPassportId
-      : null;
-  });
+      : null,
+  );
   const passportQuery = useQuery({
     queryKey: ["redevice", "passport", selectedPassportId],
     queryFn: () => {
@@ -90,6 +95,7 @@ function App() {
     },
     enabled: selectedPassportId !== null,
     refetchInterval: selectedPassportId ? 15_000 : false,
+    retry: false,
   });
 
   useEffect(() => {
@@ -98,6 +104,28 @@ function App() {
       setHasResolvedPassport(true);
     }
   }, [passportQuery.data]);
+
+  const hasReadError = passportQuery.isError || passportQuery.isRefetchError;
+  const isStaleLivePassport =
+    hasReadError &&
+    hasResolvedPassport &&
+    passport.source.kind === "live" &&
+    passport.id.toLowerCase() === selectedPassportId?.toLowerCase();
+  const isLivePassport = passport.source.kind === "live";
+  const demoLabel =
+    passport.source.kind === "fixture" ? passport.source.label : null;
+
+  function updatePassportRoute(objectId: string | null) {
+    const url = new URL(window.location.href);
+
+    if (objectId) {
+      url.searchParams.set("passport", objectId);
+    } else {
+      url.searchParams.delete("passport");
+    }
+
+    window.history.replaceState({}, "", url);
+  }
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -158,13 +186,44 @@ function App() {
         id="passport-content"
         className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14 lg:py-18"
       >
-        {passportQuery.isError && (
+        {(routeError || hasReadError) && (
           <div
             className="mb-6 rounded-2xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950"
             role="alert"
           >
-            This passport could not be loaded from Sui Testnet. Check the link
-            or scan a valid ReDevice QR code.
+            <p className="font-semibold">
+              {routeError ??
+                (passportQuery.error instanceof PassportDataError
+                  ? passportQuery.error.message
+                  : "Sui Testnet is unavailable, so this passport could not be verified.")}
+            </p>
+            {isStaleLivePassport && passport.source.kind === "live" && (
+              <p className="mt-2">
+                The last successful live read remains visible as stale data from{" "}
+                <time dateTime={passport.source.fetchedAt}>
+                  {new Date(passport.source.fetchedAt).toLocaleString("en-GB")}
+                </time>
+                .
+              </p>
+            )}
+            {selectedPassportId && (
+              <button
+                className="mt-3 min-h-11 rounded-xl border border-amber-800/25 px-4 text-xs font-semibold"
+                type="button"
+                onClick={() => void passportQuery.refetch()}
+              >
+                Retry live read
+              </button>
+            )}
+          </div>
+        )}
+
+        {passportQuery.isPending && selectedPassportId && (
+          <div
+            className="mb-6 rounded-2xl border border-line bg-surface p-4 text-sm text-muted"
+            role="status"
+          >
+            Loading the public passport from Sui Testnet… No wallet is required.
           </div>
         )}
 
@@ -207,20 +266,27 @@ function App() {
 
         <DeviceRegistration
           onPassportCreated={(objectId) => {
-            const url = new URL(window.location.href);
-            url.searchParams.set("passport", objectId);
-            window.history.replaceState({}, "", url);
+            updatePassportRoute(objectId);
+            setRouteError(null);
             setHasResolvedPassport(false);
             setSelectedPassportId(objectId);
           }}
         />
 
         <QrPassportScanner
-          passport={passport}
           onPassportResolved={(resolvedPassport) => {
+            updatePassportRoute(resolvedPassport.id);
+            setRouteError(null);
             setPassport(resolvedPassport);
             setHasResolvedPassport(true);
             setSelectedPassportId(resolvedPassport.id);
+          }}
+          onDemoRequested={(demoPassport) => {
+            updatePassportRoute(null);
+            setRouteError(null);
+            setPassport(demoPassport);
+            setHasResolvedPassport(true);
+            setSelectedPassportId(null);
           }}
         />
 
@@ -232,10 +298,17 @@ function App() {
                   Public device passport
                 </p>
                 <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
-                  {passportQuery.isPending
-                    ? "Loading Testnet"
-                    : "Live Sui Testnet"}
+                  {isStaleLivePassport
+                    ? "Stale Sui Testnet data"
+                    : isLivePassport
+                      ? "Live Sui Testnet"
+                      : "Demo fixture"}
                 </span>
+                {!isLivePassport && (
+                  <span className="rounded-full border border-amber-700/25 bg-amber-50 px-2.5 py-1 text-[0.68rem] font-semibold text-amber-900">
+                    {demoLabel}
+                  </span>
+                )}
               </div>
               <h1
                 id="passport-title"
@@ -249,17 +322,30 @@ function App() {
               </p>
             </div>
 
-            <div className="flex w-full max-w-sm items-start gap-3 rounded-2xl border border-success/25 bg-success-soft/70 p-4 lg:w-auto">
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-success text-white">
+            <div
+              className={`flex w-full max-w-sm items-start gap-3 rounded-2xl border p-4 lg:w-auto ${
+                isLivePassport
+                  ? "border-success/25 bg-success-soft/70"
+                  : "border-amber-700/25 bg-amber-50"
+              }`}
+            >
+              <span
+                className={`grid size-9 shrink-0 place-items-center rounded-full text-white ${
+                  isLivePassport ? "bg-success" : "bg-amber-700"
+                }`}
+              >
                 <ShieldCheck aria-hidden="true" className="size-5" />
               </span>
               <div>
-                <p className="text-sm font-bold text-success">
+                <p
+                  className={`text-sm font-bold ${isLivePassport ? "text-success" : "text-amber-900"}`}
+                >
                   {passport.verification.label}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-ink/70">
-                  Authorization is checked before a verified record can be
-                  added.
+                  {isLivePassport
+                    ? "Authorization is checked before a verified record can be added."
+                    : demoLabel}
                 </p>
               </div>
             </div>
@@ -303,15 +389,21 @@ function App() {
                 </h2>
                 <p className="mt-2 text-sm text-muted">{passport.category}</p>
               </div>
-              <a
-                className="max-w-full self-start truncate rounded-full bg-canvas px-3 py-1.5 font-mono text-xs font-semibold text-muted transition-colors hover:text-brand"
-                href={objectExplorerUrl(passport.id)}
-                target="_blank"
-                rel="noreferrer"
-                title={passport.id}
-              >
-                {passport.id.slice(0, 10)}…{passport.id.slice(-6)}
-              </a>
+              {isLivePassport ? (
+                <a
+                  className="max-w-full self-start truncate rounded-full bg-canvas px-3 py-1.5 font-mono text-xs font-semibold text-muted transition-colors hover:text-brand"
+                  href={objectExplorerUrl(passport.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={passport.id}
+                >
+                  {passport.id.slice(0, 10)}…{passport.id.slice(-6)}
+                </a>
+              ) : (
+                <span className="max-w-full self-start truncate rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
+                  Demo ID · no explorer proof
+                </span>
+              )}
             </div>
 
             <dl className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
@@ -394,15 +486,22 @@ function App() {
               </div>
             </div>
 
-            <PassportQrDownload
-              className="mt-6 bg-canvas"
-              passportId={passport.id}
-              deviceName={passport.deviceName}
-              brand={passport.brand}
-              model={passport.model}
-              maskedSerial={passport.maskedSerial}
-              registeredAt={passport.coverageStart.displayDate}
-            />
+            {isLivePassport ? (
+              <PassportQrDownload
+                className="mt-6 bg-canvas"
+                passportId={passport.id}
+                deviceName={passport.deviceName}
+                brand={passport.brand}
+                model={passport.model}
+                maskedSerial={passport.maskedSerial}
+                registeredAt={passport.coverageStart.displayDate}
+              />
+            ) : (
+              <div className="mt-6 rounded-xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950">
+                QR and PDF generation is disabled for demo data so the fixture
+                cannot be mistaken for a live passport link.
+              </div>
+            )}
           </article>
         </section>
 
@@ -464,8 +563,9 @@ function App() {
                   className="mt-0.5 size-5 shrink-0 text-brand"
                 />
                 <p className="text-xs leading-5 text-muted">
-                  This timeline is read from the shared DevicePassport object on
-                  Sui Testnet and refreshes automatically.
+                  {isLivePassport
+                    ? "This timeline was read from the compatible DevicePassport object on Sui Testnet and refreshes automatically."
+                    : "This is illustrative demo history, not a live blockchain record."}
                 </p>
               </div>
             </div>
@@ -567,12 +667,21 @@ function App() {
 
         <RepairWorkspace
           passport={passport}
-          onRepairConfirmed={() => passportQuery.refetch()}
+          onRepairConfirmed={async () => {
+            const result = await passportQuery.refetch();
+
+            if (result.error) {
+              throw result.error;
+            }
+
+            return result.data;
+          }}
         />
 
         <footer className="border-t border-line pt-6 text-xs leading-5 text-muted">
-          Live prototype · ReDevice package and passport data are read from Sui
-          Testnet. Physical repair claims remain repairer attestations.
+          Pre-event Sui prototype · live labels appear only after a compatible
+          Testnet read. Demo fixtures are explicitly non-live. Physical repair
+          claims remain repairer attestations.
         </footer>
       </main>
     </div>

@@ -5,7 +5,6 @@ import {
   BatteryCharging,
   CheckCircle2,
   CircleDashed,
-  FileUp,
   Info,
   Laptop,
   LockKeyhole,
@@ -13,7 +12,7 @@ import {
   WalletCards,
   Wrench,
 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { TESTNET_PACKAGE_ID, TESTNET_REPAIRER_CAP_ID } from "../constants";
 import {
   lifecycleConditionToCode,
@@ -22,6 +21,11 @@ import {
   type TransactionStatus,
 } from "../data/passport-adapter";
 import { useRepairerAuthorization } from "../hooks/use-repairer-authorization";
+import {
+  createSubmissionGuard,
+  retryConfirmedRefresh,
+  runConfirmedWrite,
+} from "../lib/transaction-flow";
 import TransactionStatusPreview from "./TransactionStatusPreview";
 
 function formatAddress(address: string) {
@@ -32,32 +36,6 @@ type RepairWorkspaceProps = {
   passport: PublicDevicePassport;
   onRepairConfirmed: () => Promise<unknown> | unknown;
 };
-
-function errorMessage(error: unknown) {
-  if (error instanceof Error) {
-    if (/rejected|denied|cancel/i.test(error.message)) {
-      return "The wallet signature was cancelled. No repair record was added.";
-    }
-
-    return error.message;
-  }
-
-  return "The transaction could not be completed. No repair record was added.";
-}
-
-function evidenceReference(fileName: string | null) {
-  if (!fileName) {
-    return "demo-evidence://not-provided";
-  }
-
-  const safeName = fileName
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-
-  return `demo-evidence://${safeName || "selected-file"}`;
-}
 
 function RepairWorkspace({
   passport,
@@ -70,7 +48,8 @@ function RepairWorkspace({
   const authorizationQuery = useRepairerAuthorization(walletAddress);
   const authorization = repairWorkspaceAdapter.getAuthorization(
     walletAddress,
-    authorizationQuery.data ?? (authorizationQuery.isError ? false : undefined),
+    authorizationQuery.data,
+    authorizationQuery.error,
   );
   const [repairType, setRepairType] = useState(workspace.defaultRepairType);
   const [nextCondition, setNextCondition] = useState(
@@ -80,38 +59,48 @@ function RepairWorkspace({
   const [notes, setNotes] = useState(
     "Battery replaced and full diagnostic completed",
   );
-  const [evidenceName, setEvidenceName] = useState<string | null>(null);
   const [transactionStatus, setTransactionStatus] =
     useState<TransactionStatus>("ready");
   const [transactionDigest, setTransactionDigest] = useState<string | null>(
     null,
   );
   const [transactionError, setTransactionError] = useState<string | null>(null);
+  const submissionGuard = useRef(createSubmissionGuard());
+  const operationVersion = useRef(0);
+  const readbackAbortController = useRef<AbortController | null>(null);
 
-  const isAuthorized = authorization.status === "authorized";
+  const isLivePassport = passport.source.kind === "live";
+  const demoLabel =
+    passport.source.kind === "fixture" ? passport.source.label : null;
+  const isAuthorized = isLivePassport && authorization.status === "authorized";
   const isBusy =
-    transactionStatus === "uploading" ||
     transactionStatus === "awaiting-signature" ||
-    transactionStatus === "submitting";
+    transactionStatus === "submitting" ||
+    transactionStatus === "confirmed-refreshing";
 
   useEffect(() => {
-    setTransactionStatus(
-      walletAddress && authorization.status === "unauthorized"
-        ? "rejected"
-        : "ready",
-    );
+    operationVersion.current += 1;
+    readbackAbortController.current?.abort();
+    readbackAbortController.current = null;
+    setTransactionStatus("ready");
+    setTransactionDigest(null);
     setTransactionError(null);
+
+    return () => {
+      operationVersion.current += 1;
+      readbackAbortController.current?.abort();
+      readbackAbortController.current = null;
+    };
   }, [authorization.status, walletAddress]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setTransactionDigest(null);
-    setTransactionError(null);
-
     if (!walletAddress || !isAuthorized) {
-      setTransactionStatus("rejected");
+      setTransactionStatus("failed");
       setTransactionError(
-        "Connect the authorized Sui Testnet repairer wallet before submitting.",
+        isLivePassport
+          ? "Connect a wallet whose permission check has succeeded before submitting."
+          : "Transactions are disabled for demo data. Load a compatible live passport first.",
       );
       return;
     }
@@ -123,7 +112,7 @@ function RepairWorkspace({
       measuredBatteryHealth < 0 ||
       measuredBatteryHealth > 100
     ) {
-      setTransactionStatus("rejected");
+      setTransactionStatus("failed");
       setTransactionError(
         "Battery health must be a whole number from 0 to 100.",
       );
@@ -132,17 +121,26 @@ function RepairWorkspace({
 
     const publicNotes = notes.trim();
     if (!publicNotes) {
-      setTransactionStatus("rejected");
+      setTransactionStatus("failed");
       setTransactionError("Add a short public repair summary.");
       return;
     }
 
-    try {
-      setTransactionStatus("uploading");
-      await new Promise<void>((resolve) =>
-        window.requestAnimationFrame(() => resolve()),
-      );
+    if (!submissionGuard.current.tryStart()) {
+      return;
+    }
 
+    setTransactionDigest(null);
+    setTransactionError(null);
+    const operationId = ++operationVersion.current;
+    readbackAbortController.current?.abort();
+    const abortController = new AbortController();
+    readbackAbortController.current = abortController;
+    const isCurrentOperation = () =>
+      operationVersion.current === operationId &&
+      readbackAbortController.current === abortController;
+
+    try {
       const transaction = new Transaction();
       transaction.moveCall({
         target: `${TESTNET_PACKAGE_ID}::redevice::add_repair_record`,
@@ -153,29 +151,74 @@ function RepairWorkspace({
           transaction.pure.string(publicNotes),
           transaction.pure.u8(lifecycleConditionToCode(nextCondition)),
           transaction.pure.u8(measuredBatteryHealth),
-          transaction.pure.string(evidenceReference(evidenceName)),
+          transaction.pure.string(""),
           transaction.pure.u64(BigInt(Date.now())),
           transaction.object.clock(),
         ],
       });
 
       setTransactionStatus("awaiting-signature");
-      const result = await dAppKit.signAndExecuteTransaction({ transaction });
+      const outcome = await runConfirmedWrite({
+        execute: () => dAppKit.signAndExecuteTransaction({ transaction }),
+        refresh: onRepairConfirmed,
+        onConfirmed: (digest) => {
+          if (!isCurrentOperation()) {
+            return;
+          }
 
-      if (result.FailedTransaction) {
-        throw new Error(
-          result.FailedTransaction.status.error?.message ??
-            "Sui rejected the transaction.",
+          setTransactionStatus("confirmed-refreshing");
+          setTransactionDigest(digest);
+          setTransactionError(null);
+        },
+        signal: abortController.signal,
+      });
+
+      if (isCurrentOperation()) {
+        setTransactionStatus(outcome.status);
+        setTransactionDigest(outcome.digest);
+        setTransactionError("error" in outcome ? outcome.error : null);
+      }
+    } finally {
+      if (readbackAbortController.current === abortController) {
+        readbackAbortController.current = null;
+      }
+      submissionGuard.current.finish();
+    }
+  }
+
+  async function handleRefreshRetry() {
+    const operationId = ++operationVersion.current;
+    readbackAbortController.current?.abort();
+    const abortController = new AbortController();
+    readbackAbortController.current = abortController;
+    const isCurrentOperation = () =>
+      operationVersion.current === operationId &&
+      readbackAbortController.current === abortController;
+
+    setTransactionStatus("confirmed-refreshing");
+    setTransactionError(null);
+
+    try {
+      await retryConfirmedRefresh(onRepairConfirmed, {
+        signal: abortController.signal,
+      });
+      if (isCurrentOperation()) {
+        setTransactionStatus("confirmed");
+        setTransactionError(null);
+      }
+    } catch (error) {
+      if (isCurrentOperation()) {
+        setTransactionStatus("confirmed-refresh-failed");
+        setTransactionError(
+          error instanceof Error
+            ? error.message
+            : "The passport refresh is still unavailable.",
         );
       }
-
-      const digest = result.Transaction.digest;
-      setTransactionStatus("confirmed");
-      setTransactionDigest(digest);
-      await onRepairConfirmed();
-    } catch (error) {
-      setTransactionStatus("rejected");
-      setTransactionError(errorMessage(error));
+    } finally {
+      if (readbackAbortController.current === abortController) {
+        readbackAbortController.current = null;
+      }
     }
   }
 
@@ -192,7 +235,7 @@ function RepairWorkspace({
               Authorized repairers
             </p>
             <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
-              Sui Testnet live
+              Sui Testnet
             </span>
           </div>
           <h2
@@ -218,7 +261,20 @@ function RepairWorkspace({
         </div>
       </div>
 
-      {!isAuthorized ? (
+      {!isLivePassport ? (
+        <div
+          className="mt-7 rounded-[1.5rem] border border-amber-700/25 bg-amber-50 p-6 text-amber-950 sm:p-8"
+          role="status"
+        >
+          <h3 className="text-xl font-semibold">
+            Transactions disabled for demo data
+          </h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6">
+            {demoLabel} Load a compatible live Sui passport before attempting a
+            repair transaction.
+          </p>
+        </div>
+      ) : !isAuthorized ? (
         <div
           className="mt-7 rounded-[1.5rem] border border-line bg-surface p-6 sm:p-8"
           role="status"
@@ -441,33 +497,18 @@ function RepairWorkspace({
               </label>
             </div>
 
-            <fieldset className="mt-6 rounded-2xl border border-line p-4 sm:p-5">
+            <fieldset
+              className="mt-6 rounded-2xl border border-line p-4 sm:p-5"
+              disabled
+            >
               <legend className="px-2 text-sm font-semibold">
                 Public evidence
               </legend>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    {evidenceName ?? "No file selected"}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-muted">
-                    Select a non-sensitive image or PDF for later Walrus upload.
-                  </p>
-                </div>
-                <label className="file-picker inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-line bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:border-brand hover:text-brand">
-                  <FileUp aria-hidden="true" className="size-4" />
-                  Choose file
-                  <input
-                    className="sr-only"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,application/pdf"
-                    onChange={(event) =>
-                      setEvidenceName(event.target.files?.[0]?.name ?? null)
-                    }
-                  />
-                </label>
-              </div>
-
+              <p className="text-sm font-medium">Evidence upload unavailable</p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                This build does not upload files or publish filenames. The
+                transaction records an empty evidence value.
+              </p>
               <div
                 className="mt-4 flex items-start gap-3 rounded-xl bg-amber-50 p-3.5 text-amber-950"
                 role="note"
@@ -498,6 +539,16 @@ function RepairWorkspace({
               error={transactionError}
             />
 
+            {transactionStatus === "confirmed-refresh-failed" && (
+              <button
+                className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl border border-line bg-canvas px-4 text-xs font-semibold text-brand"
+                type="button"
+                onClick={() => void handleRefreshRetry()}
+              >
+                Retry passport refresh
+              </button>
+            )}
+
             <button
               className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink px-5 text-sm font-semibold text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               type="submit"
@@ -511,13 +562,15 @@ function RepairWorkspace({
                   className={`size-4 ${isBusy ? "animate-spin" : ""}`}
                 />
               )}
-              {isBusy
-                ? "Waiting for Sui"
-                : transactionStatus === "confirmed"
-                  ? "Submit another repair"
-                  : isAuthorized
-                    ? "Sign and add repair record"
-                    : "Authorized wallet required"}
+              {transactionStatus === "confirmed-refreshing"
+                ? "Refreshing passport"
+                : isBusy
+                  ? "Waiting for Sui"
+                  : transactionStatus === "confirmed"
+                    ? "Submit another repair"
+                    : isAuthorized
+                      ? "Sign and add repair record"
+                      : "Authorized wallet required"}
             </button>
           </form>
         </div>

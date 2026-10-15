@@ -6,6 +6,12 @@
 **Documentation branch:** `developer`
 **Audit type:** read-only application and event audit plus implementation planning; no application, dependency, contract, or deployment changes
 
+> **Remediation note — 15 October 2026:** the audit evidence below remains a
+> historical snapshot of the audited commit. Scoped pre-event reliability fixes
+> were implemented later on `fix/pre-hackathon-foundations`; see
+> [PRE_HACKATHON_FIXES.md](PRE_HACKATHON_FIXES.md). This note does not rewrite
+> the original failures as audit-time passes.
+
 ## Evidence conventions
 
 - **Confirmed** means directly supported by inspected code, an executed diagnostic, a read-only network lookup, or an official source checked on 13 October 2026.

@@ -182,6 +182,34 @@ after the Move/Walrus integration is available.
 The final runtime smoke check also replaced the inherited Sui starter page title
 and favicon reference with ReDevice metadata.
 
+## Pre-Hackathon reliability remediation
+
+Date: 15 October 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The team requested a narrowly scoped pre-event
+reliability pass that preserves the Sui baseline and avoids Move changes,
+deployments, wallet recovery, and Stellar implementation. The requested scope
+covered deterministic installation, advisory remediation, tests/CI, truthful
+data provenance, typed errors, QR/PDF reliability, honest evidence handling,
+and transaction feedback.
+
+Files assisted:
+
+- root and web package manifests and the root workspace lockfile
+- `.github/workflows/frontend-checks.yml`
+- public passport, QR, authorization, registration, repair, PDF, and
+  transaction-status frontend code
+- focused Vitest tests and configuration
+- `README.md`, the readiness audit remediation note, and
+  `docs/PRE_HACKATHON_FIXES.md`
+
+Human verification: Automated clean-install, format, typecheck, test, build,
+dependency-audit, local-server, browser, mobile-layout, and generated-PDF checks
+were performed by Codex. No wallet was connected and no transaction was signed.
+Human review and real authorized-wallet/mobile-camera checks remain pending.
+
 ## QR passport scanner
 
 Date: 25 July 2026

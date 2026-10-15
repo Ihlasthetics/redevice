@@ -3,7 +3,6 @@ import {
   BadgeCheck,
   CircleAlert,
   CircleCheck,
-  CloudUpload,
   FileClock,
   LoaderCircle,
   ShieldX,
@@ -48,8 +47,6 @@ function StatusIcon({ status }: { status: TransactionStatus }) {
   switch (status) {
     case "ready":
       return <CircleCheck aria-hidden="true" className={iconClass} />;
-    case "uploading":
-      return <CloudUpload aria-hidden="true" className={iconClass} />;
     case "awaiting-signature":
       return <WalletCards aria-hidden="true" className={iconClass} />;
     case "submitting":
@@ -60,8 +57,12 @@ function StatusIcon({ status }: { status: TransactionStatus }) {
         />
       );
     case "confirmed":
+    case "confirmed-refresh-failed":
       return <BadgeCheck aria-hidden="true" className={iconClass} />;
-    case "rejected":
+    case "cancelled":
+      return <WalletCards aria-hidden="true" className={iconClass} />;
+    case "failed":
+    case "unknown":
       return <ShieldX aria-hidden="true" className={iconClass} />;
   }
 }
@@ -128,8 +129,14 @@ function TransactionStatusPreview({
               target="_blank"
               rel="noreferrer"
             >
-              <BadgeCheck aria-hidden="true" className="size-4" />
-              View confirmed transaction
+              {status === "failed" ? (
+                <ShieldX aria-hidden="true" className="size-4" />
+              ) : (
+                <BadgeCheck aria-hidden="true" className="size-4" />
+              )}
+              {status === "failed"
+                ? "View failed transaction"
+                : "View confirmed transaction"}
             </a>
           ) : (
             <div className="mt-3 flex items-start gap-2 border-t border-current/10 pt-3">

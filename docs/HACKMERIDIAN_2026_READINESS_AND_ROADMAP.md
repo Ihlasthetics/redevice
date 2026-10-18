@@ -6,6 +6,48 @@
 **Documentation branch:** `developer`
 **Audit type:** read-only application and event audit plus implementation planning; no application, dependency, contract, or deployment changes
 
+> **Preparation update — 18 October 2026:** this audit remains a historical snapshot of the audited commit. The two-person plan below covers pre-hackathon improvements only, not a Stellar implementation. The separate `fix/pre-hackathon-foundations` branch contains reliability fixes awaiting review and integration.
+
+## Pre-hackathon two-person execution plan
+
+### Shared base before parallel work
+
+1. Review and merge `fix/pre-hackathon-foundations` into `developer`. Its follow-up work corrects lifecycle labels/codes, repair draft and proof scoping, typed created-passport discovery, and QR/PDF target consistency. Verify the PR checks and diff before treating those changes as integrated.
+2. Finish the one shared model prerequisite: add an optional ledger attestation timestamp from `attested_at_ms`, distinct from the repairer's claimed `serviced_at_ms`. Never synthesize a missing legacy timestamp; label the two dates separately.
+3. Freeze exported passport types, component props/callbacks, and shared UI primitives at the resulting base commit. Keep `DeviceRegistration.onPassportCreated(objectId)`, `RepairWorkspace({ passport, onRepairConfirmed })`, and scanner callbacks compatible. Both people start from that exact commit in separate worktrees and use separate development ports.
+4. Keep Sui as the preparation baseline. Do not add Stellar SDKs, Soroban contracts, wallets, bridges, payments, or a generic multichain layer before the competition. Record the final pre-event commit and clarify the judged-work boundary with organizers.
+
+### Akif — records and transaction reliability
+
+**Exclusive existing files:** `web/src/data/passport-adapter.ts`, `web/src/data/sui-passport.ts`, their tests, both authorization hooks, `DeviceRegistration.tsx`, `RepairWorkspace.tsx`, `TransactionStatusPreview.tsx`, `web/src/lib/transaction-flow.ts`, configuration (`constants.ts`, `dApp-kit.ts`, `.env.example`, `vite-env.d.ts`), and setup documentation (`README.md`, `CONTRIBUTING.md`, `AI_USAGE.md`). New record helpers go under `web/src/lib/records/**`; tests stay beside owned files.
+
+1. Complete operation identity for device and wallet changes. Snapshot submitted fields, ignore stale completions, retain a known digest only with its original device/account, and test delayed signing, cancellation, timeout, and retry. Freeze editable fields during signing.
+2. Complete registration reliability. Keep type-validated passport discovery, add preparing/simulating feedback, guard before clearing previous proof, and preserve confirmed digests when readback fails. Test multiple created objects and account changes without live signing.
+3. Reject malformed live records rather than dropping repair entries or inventing dates. Reject unknown lifecycle codes and invalid required timestamps; preserve optional absence and the existing Sui battery sentinel. Test invalid records and claimed-versus-attested dates.
+4. Replace prefilled successful-repair claims with empty inputs and examples. Recheck authorization on account change, focus, and immediately before sending; offer retry for RPC/configuration errors. Explain public notes and serial normalization honestly.
+5. Document reproducible Node 22.22.2/root `npm ci` setup and live-configuration blockers. Configuration verification is read-only: do not recover wallets, grant roles, republish, or sign real transactions for this plan.
+
+**Acceptance:** no draft or success leaks across accounts/devices; invalid records fail closed; rapid submits cannot duplicate writes; known proof survives readback failure; mocked tests cover these cases without touching Yhlas's files.
+
+### Yhlas — public passport, scanner, QR/PDF, and accessibility
+
+**Exclusive existing files:** `web/src/App.tsx`, `QrPassportScanner.tsx`, `PassportQrDownload.tsx`, `web/src/lib/passport-url.ts`, `web/src/lib/passport-pdf.ts`, their tests, `web/src/index.css`, `web/index.html`, `web/src/components/ui/**`, and `docs/UI_UX_BRIEF.md`. New public presentation components go under `web/src/components/public/**`; do not alter Akif's transaction forms or shared domain exports.
+
+1. Make route, selected passport, demo mode, and provenance deterministic. A late live query must not replace a newer demo/scan selection. Support direct links and Back/Forward with clear loading, missing, incompatible, and RPC-error states.
+2. Guard scanner lookups and camera permission requests by request identity. Ignore superseded results, release acquired tracks after Stop/unmount even when permission resolves late, and test denial, unsupported cameras, out-of-order scans, and retry.
+3. Put the buyer's linked passport first. Reduce repeated summaries and wallet prompts; show empty histories clearly; distinguish live, stale, and fixture content. Never describe public chain data as private because a wallet is connected. Label claimed service and ledger attestation dates distinctly after the shared model is ready.
+4. Build on the QR target-consistency fix: show generation/export errors and retry, offer a copyable public link with clipboard-failure feedback, preserve the HTTPS-origin warning, and verify that PDF metadata, link, and QR identify the same device.
+5. Check a 375-pixel viewport, 200% zoom, keyboard/focus flow, announced errors, long IDs/history, and reduced motion. Scope CSS to public components so Akif's forms do not change indirectly.
+
+**Acceptance:** direct routes, demo selection, Back/Forward, scan races, camera cancellation, and rapid QR target changes pass mocked tests; public claims are honest; mobile and keyboard walkthroughs have no blocking defects.
+
+### Integration and exit gate
+
+- Akif owns transaction/data files; Yhlas owns public presentation. Neither changes the other's existing files during parallel work. Root manifests, lockfile, CI, `web/src/main.tsx`, and shared exported interfaces are frozen; necessary shared changes become a separate, jointly reviewed integration task.
+- Each person uses a separate worktree and port. Each AI task prompt includes file ownership, frozen contracts, tests, and the prohibition on cross-workstream edits. Neither branch runs repo-wide autoformatters or dependency upgrades.
+- Merge Akif's preparation branch first and Yhlas's second into `developer`; both review the other's diff. Then run clean `npm ci`, tests, typecheck, build, formatting, and high-severity audit on the combined result. Rehearse a wallet-free passport demo and a clearly labeled offline fixture; separately perform manual browser, wallet, and phone checks if compatible live Sui configuration is available.
+- Keep the final pre-event commit and preparation changelog separate from competition work. Do not claim organizer eligibility or a successful live transaction from mocked tests. Defer Stellar implementation, evidence uploads/private storage, Move schema redesign, production indexing, and major rebranding until the event or a separately agreed phase.
+
 ## Evidence conventions
 
 - **Confirmed** means directly supported by inspected code, an executed diagnostic, a read-only network lookup, or an official source checked on 13 October 2026.

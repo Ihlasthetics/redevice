@@ -37,6 +37,12 @@ type RepairWorkspaceProps = {
   onRepairConfirmed: () => Promise<unknown> | unknown;
 };
 
+type RepairProof = {
+  status: TransactionStatus;
+  digest: string;
+  error: string | null;
+};
+
 function RepairWorkspace({
   passport,
   onRepairConfirmed,
@@ -68,6 +74,10 @@ function RepairWorkspace({
   const submissionGuard = useRef(createSubmissionGuard());
   const operationVersion = useRef(0);
   const readbackAbortController = useRef<AbortController | null>(null);
+  const proofsByPassport = useRef(new Map<string, RepairProof>());
+  const scopeKey = `${walletAddress?.toLowerCase() ?? "disconnected"}:${passport.id.toLowerCase()}`;
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
 
   const isLivePassport = passport.source.kind === "live";
   const demoLabel =
@@ -82,16 +92,21 @@ function RepairWorkspace({
     operationVersion.current += 1;
     readbackAbortController.current?.abort();
     readbackAbortController.current = null;
-    setTransactionStatus("ready");
-    setTransactionDigest(null);
-    setTransactionError(null);
+    setRepairType(workspace.defaultRepairType);
+    setNextCondition(workspace.defaultNextCondition);
+    setBatteryHealth("96");
+    setNotes("Battery replaced and full diagnostic completed");
+    const proof = proofsByPassport.current.get(scopeKey);
+    setTransactionStatus(proof?.status ?? "ready");
+    setTransactionDigest(proof?.digest ?? null);
+    setTransactionError(proof?.error ?? null);
 
     return () => {
       operationVersion.current += 1;
       readbackAbortController.current?.abort();
       readbackAbortController.current = null;
     };
-  }, [authorization.status, walletAddress]);
+  }, [scopeKey, workspace.defaultNextCondition, workspace.defaultRepairType]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,11 +148,13 @@ function RepairWorkspace({
     setTransactionDigest(null);
     setTransactionError(null);
     const operationId = ++operationVersion.current;
+    const submittedScope = scopeKey;
     readbackAbortController.current?.abort();
     const abortController = new AbortController();
     readbackAbortController.current = abortController;
     const isCurrentOperation = () =>
       operationVersion.current === operationId &&
+      currentScope.current === submittedScope &&
       readbackAbortController.current === abortController;
 
     try {
@@ -162,6 +179,11 @@ function RepairWorkspace({
         execute: () => dAppKit.signAndExecuteTransaction({ transaction }),
         refresh: onRepairConfirmed,
         onConfirmed: (digest) => {
+          proofsByPassport.current.set(submittedScope, {
+            status: "confirmed-refreshing",
+            digest,
+            error: null,
+          });
           if (!isCurrentOperation()) {
             return;
           }
@@ -172,6 +194,14 @@ function RepairWorkspace({
         },
         signal: abortController.signal,
       });
+
+      if (outcome.digest) {
+        proofsByPassport.current.set(submittedScope, {
+          status: outcome.status,
+          digest: outcome.digest,
+          error: "error" in outcome ? outcome.error : null,
+        });
+      }
 
       if (isCurrentOperation()) {
         setTransactionStatus(outcome.status);
@@ -187,12 +217,15 @@ function RepairWorkspace({
   }
 
   async function handleRefreshRetry() {
+    const retryScope = scopeKey;
+    const retryDigest = transactionDigest;
     const operationId = ++operationVersion.current;
     readbackAbortController.current?.abort();
     const abortController = new AbortController();
     readbackAbortController.current = abortController;
     const isCurrentOperation = () =>
       operationVersion.current === operationId &&
+      currentScope.current === retryScope &&
       readbackAbortController.current === abortController;
 
     setTransactionStatus("confirmed-refreshing");
@@ -202,18 +235,32 @@ function RepairWorkspace({
       await retryConfirmedRefresh(onRepairConfirmed, {
         signal: abortController.signal,
       });
+      if (retryDigest) {
+        proofsByPassport.current.set(retryScope, {
+          status: "confirmed",
+          digest: retryDigest,
+          error: null,
+        });
+      }
       if (isCurrentOperation()) {
         setTransactionStatus("confirmed");
         setTransactionError(null);
       }
     } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The passport refresh is still unavailable.";
+      if (retryDigest) {
+        proofsByPassport.current.set(retryScope, {
+          status: "confirmed-refresh-failed",
+          digest: retryDigest,
+          error: message,
+        });
+      }
       if (isCurrentOperation()) {
         setTransactionStatus("confirmed-refresh-failed");
-        setTransactionError(
-          error instanceof Error
-            ? error.message
-            : "The passport refresh is still unavailable.",
-        );
+        setTransactionError(message);
       }
     } finally {
       if (readbackAbortController.current === abortController) {

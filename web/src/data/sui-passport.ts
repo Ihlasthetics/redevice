@@ -90,6 +90,29 @@ export async function loadTestnetPassport(
   }
 }
 
+export async function findCreatedPassportId(
+  client: SuiGrpcClient,
+  changedObjects: readonly { idOperation: string; objectId: string }[],
+): Promise<string | null> {
+  const passportType = expectedType("DevicePassport").toLowerCase();
+
+  for (const changedObject of changedObjects) {
+    if (changedObject.idOperation !== "Created") {
+      continue;
+    }
+
+    const { object } = await client.core.getObject({
+      objectId: changedObject.objectId,
+    });
+
+    if (object.type?.toLowerCase() === passportType) {
+      return changedObject.objectId;
+    }
+  }
+
+  return null;
+}
+
 export async function checkRepairerAuthorization(
   client: SuiGrpcClient,
   walletAddress: string,

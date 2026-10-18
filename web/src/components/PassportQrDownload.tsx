@@ -32,7 +32,10 @@ function PassportQrDownload({
   registeredAt,
   className = "",
 }: PassportQrDownloadProps) {
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrImage, setQrImage] = useState<{
+    payload: string;
+    dataUrl: string;
+  } | null>(null);
   const [qrError, setQrError] = useState(false);
   const passportLink = buildPassportUrl({
     passportId,
@@ -40,9 +43,11 @@ function PassportQrDownload({
     configuredOrigin: import.meta.env.VITE_PUBLIC_APP_ORIGIN,
   });
   const qrPayload = passportLink.url;
+  const qrDataUrl = qrImage?.payload === qrPayload ? qrImage.dataUrl : null;
 
   useEffect(() => {
     let active = true;
+    setQrError(false);
 
     void QRCode.toDataURL(qrPayload, {
       width: 720,
@@ -55,7 +60,7 @@ function PassportQrDownload({
     })
       .then((dataUrl) => {
         if (active) {
-          setQrDataUrl(dataUrl);
+          setQrImage({ payload: qrPayload, dataUrl });
           setQrError(false);
         }
       })

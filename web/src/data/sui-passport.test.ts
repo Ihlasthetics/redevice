@@ -120,3 +120,44 @@ describe("authorization reads", () => {
     ).rejects.toMatchObject({ code: "invalid-config" });
   });
 });
+
+describe("registration result", () => {
+  it("identifies the created passport by type instead of object order", async () => {
+    const { findCreatedPassportId } = await loadAuthorizationModule();
+    const registryId = `0x${"4".repeat(64)}`;
+    const passportId = `0x${"5".repeat(64)}`;
+    const client = mockClient(
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          object: { type: `${PACKAGE_ID}::redevice::DeviceRegistry` },
+        })
+        .mockResolvedValueOnce({
+          object: { type: `${PACKAGE_ID}::redevice::DevicePassport` },
+        }),
+    );
+
+    await expect(
+      findCreatedPassportId(client, [
+        { idOperation: "Created", objectId: registryId },
+        { idOperation: "Created", objectId: passportId },
+      ]),
+    ).resolves.toBe(passportId);
+  });
+
+  it("does not report a passport from another package", async () => {
+    const { findCreatedPassportId } = await loadAuthorizationModule();
+    const passportId = `0x${"5".repeat(64)}`;
+    const client = mockClient(
+      vi.fn().mockResolvedValue({
+        object: { type: `0x${"9".repeat(64)}::redevice::DevicePassport` },
+      }),
+    );
+
+    await expect(
+      findCreatedPassportId(client, [
+        { idOperation: "Created", objectId: passportId },
+      ]),
+    ).resolves.toBeNull();
+  });
+});

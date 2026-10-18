@@ -25,6 +25,7 @@ import {
   transactionExplorerUrl,
 } from "../constants";
 import { useRegistrarAuthorization } from "../hooks/use-registrar-authorization";
+import { findCreatedPassportId } from "../data/sui-passport";
 import {
   createSubmissionGuard,
   isWalletCancellation,
@@ -212,14 +213,14 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
         timeout: 60_000,
         include: { effects: true },
       });
-      const createdPassportId =
-        finalResult.Transaction?.effects?.changedObjects.find(
-          (object) => object.idOperation === "Created",
-        )?.objectId ?? null;
+      const createdPassportId = await findCreatedPassportId(
+        client,
+        finalResult.Transaction?.effects?.changedObjects ?? [],
+      );
 
       if (!createdPassportId) {
         throw new Error(
-          "Sui confirmed the transaction, but the new passport ID was not returned. The known first-created-object discovery limitation remains; inspect the transaction before retrying.",
+          "Sui confirmed the transaction, but its new DevicePassport could not be identified. Open the transaction in SuiVision before retrying.",
         );
       }
 
@@ -582,10 +583,10 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                       setInitialCondition(event.target.value)
                     }
                   >
-                    <option value="0">Inspected</option>
-                    <option value="1">Refurbished</option>
-                    <option value="2">In service</option>
-                    <option value="3">Retired</option>
+                    <option value="0">Used</option>
+                    <option value="1">Repaired</option>
+                    <option value="2">Refurbished</option>
+                    <option value="3">Parts only</option>
                   </select>
                 </label>
               </div>

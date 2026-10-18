@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { TESTNET_PACKAGE_ID, TESTNET_PASSPORT_ID } from "../constants";
 import {
   PassportDataError,
+  lifecycleConditionFromCode,
+  lifecycleConditionToCode,
   passportAdapter,
   qrPassportAdapter,
 } from "./passport-adapter";
@@ -25,6 +27,20 @@ const validObject = {
 };
 
 describe("passport provenance", () => {
+  it("uses the Move contract's lifecycle codes for every condition", () => {
+    const conditions = [
+      "Used",
+      "Repaired",
+      "Refurbished",
+      "Parts only",
+    ] as const;
+
+    conditions.forEach((condition, code) => {
+      expect(lifecycleConditionFromCode(code)).toBe(condition);
+      expect(lifecycleConditionToCode(condition)).toBe(code);
+    });
+  });
+
   it("keeps the sample explicitly marked as a non-live fixture", () => {
     const passport = passportAdapter.getPublicPassport();
 

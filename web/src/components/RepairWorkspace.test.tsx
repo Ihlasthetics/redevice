@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { passportAdapter } from "../data/passport-adapter";
 
@@ -152,5 +152,48 @@ describe("repair actions", () => {
     expect(
       screen.getByRole("link", { name: /view confirmed transaction/i }),
     ).toHaveAttribute("href", expect.stringContaining("confirmed-digest"));
+  });
+
+  it("resets the draft and keeps transaction proof with its original passport", async () => {
+    walletMocks.signAndExecuteTransaction.mockResolvedValue({
+      Transaction: { digest: "first-passport-digest" },
+    });
+    const firstPassport = { ...livePassport, id: `0x${"2".repeat(64)}` };
+    const secondPassport = { ...livePassport, id: `0x${"3".repeat(64)}` };
+    const props = { onRepairConfirmed: vi.fn().mockResolvedValue(undefined) };
+    const view = render(
+      <RepairWorkspace passport={firstPassport} {...props} />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/repair notes/i), {
+      target: { value: "First device only" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /sign and add repair record/i }),
+    );
+    expect(
+      await screen.findByText("Repair record confirmed"),
+    ).toBeInTheDocument();
+
+    view.rerender(<RepairWorkspace passport={secondPassport} {...props} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText(/repair notes/i)).not.toHaveValue(
+        "First device only",
+      );
+    });
+    expect(
+      screen.queryByText("Repair record confirmed"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /view confirmed transaction/i }),
+    ).not.toBeInTheDocument();
+
+    view.rerender(<RepairWorkspace passport={firstPassport} {...props} />);
+    expect(
+      await screen.findByText("Repair record confirmed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /view confirmed transaction/i }),
+    ).toHaveAttribute("href", expect.stringContaining("first-passport-digest"));
   });
 });

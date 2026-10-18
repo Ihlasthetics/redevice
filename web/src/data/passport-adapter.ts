@@ -18,7 +18,7 @@ export class PassportDataError extends Error {
 }
 
 export type LifecycleCondition =
-  "Inspected" | "Refurbished" | "In service" | "Retired";
+  "Used" | "Repaired" | "Refurbished" | "Parts only";
 
 export type VerificationLevel = {
   label: string;
@@ -188,17 +188,17 @@ type OnchainRepair = {
 };
 
 const lifecycleConditions: LifecycleCondition[] = [
-  "Inspected",
+  "Used",
+  "Repaired",
   "Refurbished",
-  "In service",
-  "Retired",
+  "Parts only",
 ];
 
 export function lifecycleConditionFromCode(
   value: string | number,
 ): LifecycleCondition {
   const index = Number(value);
-  return lifecycleConditions[index] ?? "Inspected";
+  return lifecycleConditions[index] ?? "Used";
 }
 
 export function lifecycleConditionToCode(value: LifecycleCondition): number {
@@ -355,7 +355,7 @@ const fallbackPassport: PublicDevicePassport = {
       summary: "Battery replaced and full diagnostic completed",
       repairer: "ReDevice Lisbon Service · 0xd7fd25…5f215",
       conditionChange: {
-        previous: "Inspected",
+        previous: "Used",
         next: "Refurbished",
       },
       batteryHealth: 96,

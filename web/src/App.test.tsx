@@ -51,7 +51,7 @@ const livePassport: PublicDevicePassport = {
   category: "Laptop computer",
   maskedSerial: "ABC•••1234",
   serialHash: `0x${"b".repeat(64)}`,
-  condition: "Inspected",
+  condition: "Used",
   coverageStart: { isoDate: "2026-10-15", displayDate: "15 October 2026" },
   verification: {
     label: "On-chain record",

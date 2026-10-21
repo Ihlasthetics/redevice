@@ -15,10 +15,15 @@ is involved.
 - current lifecycle condition
 - verification level with plain-language explanation
 - "verified history begins here" coverage date
-- repair timeline
+- repair timeline with explicit empty history, claimed service dates, and optional ledger attestation dates
 - evidence link and Sui Explorer link per verified record
 - visible warning that earlier history is unknown
-- no wallet requirement
+- no wallet requirement; public chain records are never described as private
+- linked passport and its loading/error state appear before scanner and transaction tools
+- route-driven selection, including browser Back/Forward and explicit demo links
+- clearly labeled live, refreshing/stale, and fixture provenance; fixtures cannot enable writes
+- copyable public URL, clipboard feedback, QR retry, and PDF save retry
+- records attest to a signer and information, not proof of physical repair or official certification
 
 ### Repair workspace
 
@@ -26,8 +31,8 @@ is involved.
 - selected device summary
 - repair type, notes, previous/new lifecycle state
 - optional battery health
-- public-evidence file selection with privacy warning
-- transaction states: ready, uploading, awaiting signature, submitting,
+- public fields only; no evidence upload or private storage is implemented
+- transaction states: ready, preparing, awaiting signature, submitting,
   confirmed, rejected
 
 ### Unauthorized result
@@ -58,9 +63,9 @@ is involved.
 
 ## Integration boundary
 
-Keep mock data in one typed file or adapter. Do not hard-code it throughout
-components. The integration owner will replace that adapter with Sui object
-queries later.
+Keep fixtures in the shared typed adapter and label them explicitly. Live reads
+already use the Sui service boundary. Public components consume the shared types;
+transaction forms and authorization remain owned by Akif.
 
 Do not change:
 

@@ -18,8 +18,8 @@ import {
 } from "lucide-react";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { objectExplorerUrl } from "./constants";
 import {
   PassportDataError,
@@ -67,23 +67,30 @@ function RecordLink({
 
 function App() {
   const client = useCurrentClient();
-  const requestedPassportId = new URLSearchParams(window.location.search).get(
-    "passport",
-  );
-  const [passport, setPassport] = useState(() =>
-    passportAdapter.getPublicPassport(),
-  );
-  const [hasResolvedPassport, setHasResolvedPassport] = useState(false);
-  const [routeError, setRouteError] = useState<string | null>(() =>
-    requestedPassportId && !/^0x[0-9a-f]{64}$/i.test(requestedPassportId)
+  const queryClient = useQueryClient();
+  const [route, setRoute] = useState(() => window.location.search);
+  const [selectionVersion, setSelectionVersion] = useState(0);
+  const resultRef = useRef<HTMLDivElement>(null);
+  const params = new URLSearchParams(route);
+  const requestedPassportId = params.get("passport");
+  const routeError =
+    requestedPassportId !== null &&
+    !/^0x[0-9a-f]{64}$/i.test(requestedPassportId)
       ? "The passport link is invalid. Use a 66-character Sui object ID beginning with 0x, or scan a ReDevice QR code."
-      : null,
-  );
-  const [selectedPassportId, setSelectedPassportId] = useState<string | null>(
-    requestedPassportId && /^0x[0-9a-f]{64}$/i.test(requestedPassportId)
-      ? requestedPassportId
-      : null,
-  );
+      : null;
+  const selectedPassportId = routeError
+    ? null
+    : (requestedPassportId?.toLowerCase() ?? null);
+  const isDemo = requestedPassportId === null && params.get("demo") === "1";
+
+  useEffect(() => {
+    const navigate = () => {
+      setRoute(window.location.search);
+      setSelectionVersion((version) => version + 1);
+    };
+    window.addEventListener("popstate", navigate);
+    return () => window.removeEventListener("popstate", navigate);
+  }, []);
   const passportQuery = useQuery({
     queryKey: ["redevice", "passport", selectedPassportId],
     queryFn: () => {
@@ -98,16 +105,28 @@ function App() {
     retry: false,
   });
 
+  // Query data belongs only to the current route; never copy a late result
+  // into independent selection state.
+  const passport =
+    (!isDemo && selectedPassportId && passportQuery.data) ||
+    passportAdapter.getPublicPassport();
+  const hasResolvedPassport =
+    isDemo || Boolean(selectedPassportId && passportQuery.data);
+
   useEffect(() => {
-    if (passportQuery.data) {
-      setPassport(passportQuery.data);
-      setHasResolvedPassport(true);
+    if (selectionVersion > 0 || requestedPassportId !== null) {
+      resultRef.current?.focus();
     }
-  }, [passportQuery.data]);
+  }, [
+    selectionVersion,
+    hasResolvedPassport,
+    passportQuery.isError,
+    requestedPassportId,
+  ]);
 
   const hasReadError = passportQuery.isError || passportQuery.isRefetchError;
   const isStaleLivePassport =
-    hasReadError &&
+    (hasReadError || passportQuery.isFetching) &&
     hasResolvedPassport &&
     passport.source.kind === "live" &&
     passport.id.toLowerCase() === selectedPassportId?.toLowerCase();
@@ -118,13 +137,17 @@ function App() {
   function updatePassportRoute(objectId: string | null) {
     const url = new URL(window.location.href);
 
+    url.searchParams.delete("demo");
     if (objectId) {
       url.searchParams.set("passport", objectId);
     } else {
       url.searchParams.delete("passport");
+      url.searchParams.set("demo", "1");
     }
 
-    window.history.replaceState({}, "", url);
+    window.history.pushState({}, "", url);
+    setRoute(url.search);
+    setSelectionVersion((version) => version + 1);
   }
 
   return (
@@ -186,54 +209,467 @@ function App() {
         id="passport-content"
         className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14 lg:py-18"
       >
-        {(routeError || hasReadError) && (
-          <div
-            className="mb-6 rounded-2xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950"
-            role="alert"
-          >
-            <p className="font-semibold">
-              {routeError ??
-                (passportQuery.error instanceof PassportDataError
-                  ? passportQuery.error.message
-                  : "Sui Testnet is unavailable, so this passport could not be verified.")}
-            </p>
-            {isStaleLivePassport && passport.source.kind === "live" && (
-              <p className="mt-2">
-                The last successful live read remains visible as stale data from{" "}
-                <time dateTime={passport.source.fetchedAt}>
-                  {new Date(passport.source.fetchedAt).toLocaleString("en-GB")}
-                </time>
-                .
+        <div
+          className="public-experience"
+          ref={resultRef}
+          tabIndex={-1}
+          aria-label="Public passport result"
+        >
+          {(routeError || hasReadError) && (
+            <div
+              className="mb-6 rounded-2xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950"
+              role="alert"
+            >
+              <p className="font-semibold">
+                {routeError ??
+                  (passportQuery.error instanceof PassportDataError
+                    ? passportQuery.error.message
+                    : "Sui Testnet is unavailable, so this passport could not be verified.")}
+              </p>
+              {isStaleLivePassport && passport.source.kind === "live" && (
+                <p className="mt-2">
+                  The last successful live read remains visible as stale data
+                  from{" "}
+                  <time dateTime={passport.source.fetchedAt}>
+                    {new Date(passport.source.fetchedAt).toLocaleString(
+                      "en-GB",
+                    )}
+                  </time>
+                  .
+                </p>
+              )}
+              {selectedPassportId && (
+                <button
+                  className="mt-3 min-h-11 rounded-xl border border-amber-800/25 px-4 text-xs font-semibold"
+                  type="button"
+                  onClick={() => void passportQuery.refetch()}
+                >
+                  Retry live read
+                </button>
+              )}
+              <a className="block mt-3 underline" href="#qr-scanner">
+                Scan or enter another passport
+              </a>
+            </div>
+          )}
+
+          {passportQuery.isPending && selectedPassportId && (
+            <div
+              className="mb-6 rounded-2xl border border-line bg-surface p-4 text-sm text-muted"
+              role="status"
+            >
+              Loading the public passport from Sui Testnet… No wallet is
+              required.
+            </div>
+          )}
+
+          {passportQuery.isFetching &&
+            hasResolvedPassport &&
+            selectedPassportId && (
+              <p role="status" className="mb-4 text-sm text-muted">
+                Refreshing this passport. Showing the last successful read.
               </p>
             )}
-            {selectedPassportId && (
-              <button
-                className="mt-3 min-h-11 rounded-xl border border-amber-800/25 px-4 text-xs font-semibold"
-                type="button"
-                onClick={() => void passportQuery.refetch()}
-              >
-                Retry live read
-              </button>
-            )}
-          </div>
-        )}
-
-        {passportQuery.isPending && selectedPassportId && (
-          <div
-            className="mb-6 rounded-2xl border border-line bg-surface p-4 text-sm text-muted"
-            role="status"
+          <section
+            aria-labelledby="passport-title"
+            hidden={!hasResolvedPassport}
           >
-            Loading the public passport from Sui Testnet… No wallet is required.
-          </div>
-        )}
+            <div className="flex flex-col gap-8 border-b border-line pb-10 sm:pb-12 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
+                    Public device passport
+                  </p>
+                  <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
+                    {isStaleLivePassport
+                      ? "Stale Sui Testnet data"
+                      : isLivePassport
+                        ? "Live Sui Testnet"
+                        : "Demo fixture"}
+                  </span>
+                  {!isLivePassport && (
+                    <span className="rounded-full border border-amber-700/25 bg-amber-50 px-2.5 py-1 text-[0.68rem] font-semibold text-amber-900">
+                      {demoLabel}
+                    </span>
+                  )}
+                </div>
+                <h1
+                  id="passport-title"
+                  className="mt-5 text-4xl font-semibold leading-[1.04] tracking-[-0.04em] sm:text-5xl lg:text-6xl"
+                >
+                  {passport.deviceName}
+                </h1>
+                <p className="mt-5 max-w-2xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
+                  A plain-language record of this device&apos;s identity,
+                  condition, and recorded service history.
+                </p>
+              </div>
 
+              <div
+                className={`flex w-full max-w-sm items-start gap-3 rounded-2xl border p-4 lg:w-auto ${
+                  isLivePassport
+                    ? "border-success/25 bg-success-soft/70"
+                    : "border-amber-700/25 bg-amber-50"
+                }`}
+              >
+                <span
+                  className={`grid size-9 shrink-0 place-items-center rounded-full text-white ${
+                    isLivePassport ? "bg-success" : "bg-amber-700"
+                  }`}
+                >
+                  <ShieldCheck aria-hidden="true" className="size-5" />
+                </span>
+                <div>
+                  <p
+                    className={`text-sm font-bold ${isLivePassport ? "text-success" : "text-amber-900"}`}
+                  >
+                    {passport.verification.label}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-ink/70">
+                    {isLivePassport
+                      ? "Authorization is checked before a verified record can be added."
+                      : demoLabel}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            aria-label="Device summary"
+            className="grid gap-6 py-8 sm:py-10 lg:grid-cols-[0.82fr_1.18fr]"
+            hidden={!hasResolvedPassport}
+          >
+            <figure className="flex min-h-72 flex-col overflow-hidden rounded-[1.75rem] border border-line bg-surface shadow-[0_28px_70px_-52px_rgba(21,31,28,0.45)] sm:min-h-96">
+              <div className="grid flex-1 place-items-center bg-[radial-gradient(circle_at_center,#e3eee7_0%,#f4f2eb_66%)] p-8">
+                <div className="grid size-36 place-items-center rounded-full border border-brand/15 bg-surface/75 text-brand shadow-sm sm:size-44">
+                  <Laptop
+                    aria-hidden="true"
+                    className="size-20 stroke-[1.15] sm:size-24"
+                  />
+                </div>
+              </div>
+              <figcaption className="flex items-center gap-3 border-t border-line px-5 py-4 text-sm text-muted">
+                <ScanLine
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-brand"
+                />
+                <div>
+                  Product image placeholder · compare the masked serial with the
+                  physical device.
+                </div>
+              </figcaption>
+            </figure>
+
+            <article className="rounded-[1.75rem] border border-line bg-surface p-5 shadow-[0_28px_70px_-52px_rgba(21,31,28,0.45)] sm:p-8">
+              <div className="flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">
+                    Device identity
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em]">
+                    {passport.brand} {passport.model}
+                  </h2>
+                  <p className="mt-2 text-sm text-muted">{passport.category}</p>
+                </div>
+                {isLivePassport ? (
+                  <a
+                    className="max-w-full self-start truncate rounded-full bg-canvas px-3 py-1.5 font-mono text-xs font-semibold text-muted transition-colors hover:text-brand"
+                    href={objectExplorerUrl(passport.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={passport.id}
+                  >
+                    {passport.id.slice(0, 10)}…{passport.id.slice(-6)}
+                  </a>
+                ) : (
+                  <span className="max-w-full self-start truncate rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
+                    Demo ID · no explorer proof
+                  </span>
+                )}
+              </div>
+
+              <dl className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
+                <div className="bg-surface p-5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                    Masked serial
+                  </dt>
+                  <dd className="mt-2 font-mono text-lg font-semibold tracking-wide">
+                    {passport.maskedSerial}
+                  </dd>
+                </div>
+
+                <div className="bg-surface p-5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                    Current condition
+                  </dt>
+                  <dd className="mt-2 flex items-center gap-2 text-lg font-semibold">
+                    <CircleCheck
+                      aria-hidden="true"
+                      className="size-5 text-success"
+                    />
+                    {passport.condition}
+                  </dd>
+                </div>
+
+                <div className="bg-surface p-5 sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                    Duplicate protection
+                  </dt>
+                  <dd className="mt-2 flex items-center gap-2 text-sm font-semibold">
+                    <ShieldCheck
+                      aria-hidden="true"
+                      className="size-5 shrink-0 text-success"
+                    />
+                    {passport.serialHash
+                      ? `Serial hash bound · ${passport.serialHash.slice(0, 10)}…${passport.serialHash.slice(-6)}`
+                      : "Legacy passport · serial registry not available"}
+                  </dd>
+                </div>
+
+                <div className="bg-surface p-5 sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                    Verified history begins
+                  </dt>
+                  <dd className="mt-2 flex items-center gap-2 text-lg font-semibold">
+                    <CalendarDays
+                      aria-hidden="true"
+                      className="size-5 text-brand"
+                    />
+                    <time dateTime={passport.coverageStart.isoDate}>
+                      {passport.coverageStart.displayDate}
+                    </time>
+                  </dd>
+                </div>
+                <div className="bg-surface p-5 sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                    Registered issuer
+                  </dt>
+                  <dd className="mt-2 font-mono text-sm font-semibold">
+                    {passport.manufacturer}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="mt-6 rounded-2xl bg-ink p-5 text-canvas sm:p-6">
+                <div className="flex items-start gap-3">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand">
+                    <Check aria-hidden="true" className="size-4" />
+                  </span>
+                  <div>
+                    <h2 className="font-semibold">
+                      What this verification means
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-canvas/75">
+                      {passport.verification.explanation} Records attest to a
+                      signer and recorded information; they do not prove that
+                      the physical repair occurred.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {isLivePassport ? (
+                <PassportQrDownload
+                  className="mt-6 bg-canvas"
+                  passportId={passport.id}
+                  deviceName={passport.deviceName}
+                  brand={passport.brand}
+                  model={passport.model}
+                  maskedSerial={passport.maskedSerial}
+                  registeredAt={passport.coverageStart.displayDate}
+                />
+              ) : (
+                <div className="mt-6 rounded-xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950">
+                  QR and PDF generation is disabled for demo data so the fixture
+                  cannot be mistaken for a live passport link.
+                </div>
+              )}
+            </article>
+          </section>
+
+          <aside
+            aria-labelledby="limited-history-title"
+            className="mb-2 rounded-[1.5rem] border border-amber-700/25 bg-amber-50 p-5 text-amber-950 sm:p-6"
+            hidden={!hasResolvedPassport}
+          >
+            <div className="flex items-start gap-4">
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800">
+                <AlertTriangle aria-hidden="true" className="size-5" />
+              </span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-800">
+                  Limited history
+                </p>
+                <h2
+                  id="limited-history-title"
+                  className="mt-1.5 text-lg font-semibold tracking-[-0.015em]"
+                >
+                  Earlier service history is unknown
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-950/75">
+                  Verified coverage begins on{" "}
+                  <time dateTime={passport.coverageStart.isoDate}>
+                    {passport.coverageStart.displayDate}
+                  </time>
+                  . Repairs or changes before this date are not included in this
+                  passport and should not be assumed to be verified.
+                </p>
+              </div>
+            </div>
+          </aside>
+
+          <section
+            aria-labelledby="repair-history-title"
+            className="border-t border-line py-10 sm:py-14"
+            hidden={!hasResolvedPassport}
+          >
+            <div className="grid gap-7 lg:grid-cols-[0.72fr_1.28fr] lg:gap-12">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
+                  Verified service records
+                </p>
+                <h2
+                  id="repair-history-title"
+                  className="mt-3 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl"
+                >
+                  Repair history
+                </h2>
+                <p className="mt-4 max-w-md text-sm leading-6 text-muted sm:text-base sm:leading-7">
+                  Each record shows what an authorized repairer attested to. A
+                  record does not prove that the physical work occurred.
+                </p>
+
+                <div className="mt-6 flex items-start gap-3 rounded-2xl border border-line bg-surface p-4">
+                  <History
+                    aria-hidden="true"
+                    className="mt-0.5 size-5 shrink-0 text-brand"
+                  />
+                  <p className="text-xs leading-5 text-muted">
+                    {isLivePassport
+                      ? "This timeline was read from the compatible DevicePassport object on Sui Testnet and refreshes automatically."
+                      : "This is illustrative demo history, not a live blockchain record."}
+                  </p>
+                </div>
+              </div>
+
+              <ol className="space-y-5">
+                {passport.repairHistory.length === 0 && (
+                  <li>
+                    No repair records have been recorded for this passport.
+                  </li>
+                )}
+                {passport.repairHistory.map((record, index) => (
+                  <li
+                    key={record.id}
+                    className="relative rounded-[1.5rem] border border-line bg-surface p-5 shadow-[0_24px_60px_-50px_rgba(21,31,28,0.5)] sm:p-7"
+                  >
+                    <div className="flex flex-col gap-4 border-b border-line pb-5 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start gap-3">
+                        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success-soft text-success">
+                          <Wrench aria-hidden="true" className="size-4.5" />
+                        </span>
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">
+                            Record {passport.repairHistory.length - index}
+                          </p>
+                          <h3 className="mt-1 text-xl font-semibold tracking-[-0.02em]">
+                            {record.repairType}
+                          </h3>
+                        </div>
+                      </div>
+
+                      <time
+                        className="inline-flex min-h-11 items-center gap-2 self-start rounded-full bg-canvas px-3.5 text-xs font-semibold text-muted"
+                        dateTime={record.serviceDate.isoDate}
+                      >
+                        <CalendarDays aria-hidden="true" className="size-4" />
+                        Claimed service date: {record.serviceDate.displayDate}
+                      </time>
+                    </div>
+
+                    {record.attestedAt && (
+                      <p className="mt-3 text-sm text-muted">
+                        Ledger attestation date:{" "}
+                        <time dateTime={record.attestedAt.isoDate}>
+                          {record.attestedAt.displayDate}
+                        </time>
+                      </p>
+                    )}
+                    <p className="mt-5 text-sm leading-6 text-ink/80">
+                      {record.summary}
+                    </p>
+
+                    <dl className="mt-5 grid gap-4 rounded-2xl bg-canvas p-4 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+                          Attested by
+                        </dt>
+                        <dd className="mt-1.5 text-sm font-semibold">
+                          {record.repairer}
+                        </dd>
+                      </div>
+
+                      <div>
+                        <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+                          Condition
+                        </dt>
+                        <dd className="mt-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold">
+                          <span>{record.conditionChange.previous}</span>
+                          <ArrowRight
+                            aria-hidden="true"
+                            className="size-4 text-brand"
+                          />
+                          <span>{record.conditionChange.next}</span>
+                        </dd>
+                      </div>
+
+                      {record.batteryHealth !== undefined && (
+                        <div className="sm:col-span-2">
+                          <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+                            Battery health after service
+                          </dt>
+                          <dd className="mt-1.5 flex items-center gap-2 text-sm font-semibold">
+                            <BatteryMedium
+                              aria-hidden="true"
+                              className="size-5 text-success"
+                            />
+                            {record.batteryHealth}%
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    <div
+                      className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
+                      aria-label={`Resources for ${record.repairType}`}
+                    >
+                      <RecordLink
+                        icon={
+                          <FileCheck2 aria-hidden="true" className="size-4" />
+                        }
+                        resource={record.evidence}
+                      />
+                      <RecordLink
+                        icon={
+                          <ScanLine aria-hidden="true" className="size-4" />
+                        }
+                        resource={record.transaction}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </section>
+        </div>
         <section
           aria-labelledby="choose-path-title"
           className="mb-8 grid gap-3 sm:grid-cols-2"
         >
-          <h1 id="choose-path-title" className="sr-only">
+          <h2 id="choose-path-title" className="sr-only">
             Choose a ReDevice action
-          </h1>
+          </h2>
           <a
             className="group flex min-h-24 items-center gap-4 rounded-2xl border border-line bg-surface p-5 transition-colors hover:border-brand"
             href="#qr-scanner"
@@ -264,420 +700,38 @@ function App() {
           </a>
         </section>
 
-        <DeviceRegistration
-          onPassportCreated={(objectId) => {
-            updatePassportRoute(objectId);
-            setRouteError(null);
-            setHasResolvedPassport(false);
-            setSelectedPassportId(objectId);
-          }}
-        />
-
         <QrPassportScanner
-          onPassportResolved={(resolvedPassport) => {
-            updatePassportRoute(resolvedPassport.id);
-            setRouteError(null);
-            setPassport(resolvedPassport);
-            setHasResolvedPassport(true);
-            setSelectedPassportId(resolvedPassport.id);
+          key={selectionVersion}
+          onLookupRequested={updatePassportRoute}
+          onPassportResolved={(resolved) => {
+            queryClient.setQueryData(
+              ["redevice", "passport", resolved.id],
+              resolved,
+            );
+            updatePassportRoute(resolved.id);
           }}
-          onDemoRequested={(demoPassport) => {
-            updatePassportRoute(null);
-            setRouteError(null);
-            setPassport(demoPassport);
-            setHasResolvedPassport(true);
-            setSelectedPassportId(null);
-          }}
+          onDemoRequested={() => updatePassportRoute(null)}
         />
-
-        <section aria-labelledby="passport-title" hidden={!hasResolvedPassport}>
-          <div className="flex flex-col gap-8 border-b border-line pb-10 sm:pb-12 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
-                  Public device passport
-                </p>
-                <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted">
-                  {isStaleLivePassport
-                    ? "Stale Sui Testnet data"
-                    : isLivePassport
-                      ? "Live Sui Testnet"
-                      : "Demo fixture"}
-                </span>
-                {!isLivePassport && (
-                  <span className="rounded-full border border-amber-700/25 bg-amber-50 px-2.5 py-1 text-[0.68rem] font-semibold text-amber-900">
-                    {demoLabel}
-                  </span>
-                )}
-              </div>
-              <h1
-                id="passport-title"
-                className="mt-5 text-4xl font-semibold leading-[1.04] tracking-[-0.04em] sm:text-5xl lg:text-6xl"
-              >
-                {passport.deviceName}
-              </h1>
-              <p className="mt-5 max-w-2xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
-                A plain-language record of this device&apos;s identity,
-                condition, and verified service coverage.
-              </p>
-            </div>
-
-            <div
-              className={`flex w-full max-w-sm items-start gap-3 rounded-2xl border p-4 lg:w-auto ${
-                isLivePassport
-                  ? "border-success/25 bg-success-soft/70"
-                  : "border-amber-700/25 bg-amber-50"
-              }`}
-            >
-              <span
-                className={`grid size-9 shrink-0 place-items-center rounded-full text-white ${
-                  isLivePassport ? "bg-success" : "bg-amber-700"
-                }`}
-              >
-                <ShieldCheck aria-hidden="true" className="size-5" />
-              </span>
-              <div>
-                <p
-                  className={`text-sm font-bold ${isLivePassport ? "text-success" : "text-amber-900"}`}
-                >
-                  {passport.verification.label}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-ink/70">
-                  {isLivePassport
-                    ? "Authorization is checked before a verified record can be added."
-                    : demoLabel}
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          aria-label="Device summary"
-          className="grid gap-6 py-8 sm:py-10 lg:grid-cols-[0.82fr_1.18fr]"
-          hidden={!hasResolvedPassport}
-        >
-          <figure className="flex min-h-72 flex-col overflow-hidden rounded-[1.75rem] border border-line bg-surface shadow-[0_28px_70px_-52px_rgba(21,31,28,0.45)] sm:min-h-96">
-            <div className="grid flex-1 place-items-center bg-[radial-gradient(circle_at_center,#e3eee7_0%,#f4f2eb_66%)] p-8">
-              <div className="grid size-36 place-items-center rounded-full border border-brand/15 bg-surface/75 text-brand shadow-sm sm:size-44">
-                <Laptop
-                  aria-hidden="true"
-                  className="size-20 stroke-[1.15] sm:size-24"
-                />
-              </div>
-            </div>
-            <figcaption className="flex items-center gap-3 border-t border-line px-5 py-4 text-sm text-muted">
-              <ScanLine
-                aria-hidden="true"
-                className="size-4 shrink-0 text-brand"
-              />
-              <div>
-                Product image placeholder · compare the masked serial with the
-                physical device.
-              </div>
-            </figcaption>
-          </figure>
-
-          <article className="rounded-[1.75rem] border border-line bg-surface p-5 shadow-[0_28px_70px_-52px_rgba(21,31,28,0.45)] sm:p-8">
-            <div className="flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">
-                  Device identity
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em]">
-                  {passport.brand} {passport.model}
-                </h2>
-                <p className="mt-2 text-sm text-muted">{passport.category}</p>
-              </div>
-              {isLivePassport ? (
-                <a
-                  className="max-w-full self-start truncate rounded-full bg-canvas px-3 py-1.5 font-mono text-xs font-semibold text-muted transition-colors hover:text-brand"
-                  href={objectExplorerUrl(passport.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={passport.id}
-                >
-                  {passport.id.slice(0, 10)}…{passport.id.slice(-6)}
-                </a>
-              ) : (
-                <span className="max-w-full self-start truncate rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
-                  Demo ID · no explorer proof
-                </span>
-              )}
-            </div>
-
-            <dl className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
-              <div className="bg-surface p-5">
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                  Masked serial
-                </dt>
-                <dd className="mt-2 font-mono text-lg font-semibold tracking-wide">
-                  {passport.maskedSerial}
-                </dd>
-              </div>
-
-              <div className="bg-surface p-5">
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                  Current condition
-                </dt>
-                <dd className="mt-2 flex items-center gap-2 text-lg font-semibold">
-                  <CircleCheck
-                    aria-hidden="true"
-                    className="size-5 text-success"
-                  />
-                  {passport.condition}
-                </dd>
-              </div>
-
-              <div className="bg-surface p-5 sm:col-span-2">
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                  Duplicate protection
-                </dt>
-                <dd className="mt-2 flex items-center gap-2 text-sm font-semibold">
-                  <ShieldCheck
-                    aria-hidden="true"
-                    className="size-5 shrink-0 text-success"
-                  />
-                  {passport.serialHash
-                    ? `Serial hash bound · ${passport.serialHash.slice(0, 10)}…${passport.serialHash.slice(-6)}`
-                    : "Legacy passport · serial registry not available"}
-                </dd>
-              </div>
-
-              <div className="bg-surface p-5 sm:col-span-2">
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                  Verified history begins
-                </dt>
-                <dd className="mt-2 flex items-center gap-2 text-lg font-semibold">
-                  <CalendarDays
-                    aria-hidden="true"
-                    className="size-5 text-brand"
-                  />
-                  <time dateTime={passport.coverageStart.isoDate}>
-                    {passport.coverageStart.displayDate}
-                  </time>
-                </dd>
-              </div>
-              <div className="bg-surface p-5 sm:col-span-2">
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                  Registered issuer
-                </dt>
-                <dd className="mt-2 font-mono text-sm font-semibold">
-                  {passport.manufacturer}
-                </dd>
-              </div>
-            </dl>
-
-            <div className="mt-6 rounded-2xl bg-ink p-5 text-canvas sm:p-6">
-              <div className="flex items-start gap-3">
-                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand">
-                  <Check aria-hidden="true" className="size-4" />
-                </span>
-                <div>
-                  <h2 className="font-semibold">
-                    What this verification means
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-canvas/75">
-                    {passport.verification.explanation} It verifies the
-                    repairer&apos;s attestation—not that the physical repair
-                    itself occurred.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {isLivePassport ? (
-              <PassportQrDownload
-                className="mt-6 bg-canvas"
-                passportId={passport.id}
-                deviceName={passport.deviceName}
-                brand={passport.brand}
-                model={passport.model}
-                maskedSerial={passport.maskedSerial}
-                registeredAt={passport.coverageStart.displayDate}
-              />
-            ) : (
-              <div className="mt-6 rounded-xl border border-amber-700/25 bg-amber-50 p-4 text-sm text-amber-950">
-                QR and PDF generation is disabled for demo data so the fixture
-                cannot be mistaken for a live passport link.
-              </div>
-            )}
-          </article>
-        </section>
-
-        <aside
-          aria-labelledby="limited-history-title"
-          className="mb-2 rounded-[1.5rem] border border-amber-700/25 bg-amber-50 p-5 text-amber-950 sm:p-6"
-          hidden={!hasResolvedPassport}
-        >
-          <div className="flex items-start gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800">
-              <AlertTriangle aria-hidden="true" className="size-5" />
-            </span>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-800">
-                Limited history
-              </p>
-              <h2
-                id="limited-history-title"
-                className="mt-1.5 text-lg font-semibold tracking-[-0.015em]"
-              >
-                Earlier service history is unknown
-              </h2>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-950/75">
-                Verified coverage begins on{" "}
-                <time dateTime={passport.coverageStart.isoDate}>
-                  {passport.coverageStart.displayDate}
-                </time>
-                . Repairs or changes before this date are not included in this
-                passport and should not be assumed to be verified.
-              </p>
-            </div>
-          </div>
-        </aside>
-
-        <section
-          aria-labelledby="repair-history-title"
-          className="border-t border-line py-10 sm:py-14"
-          hidden={!hasResolvedPassport}
-        >
-          <div className="grid gap-7 lg:grid-cols-[0.72fr_1.28fr] lg:gap-12">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">
-                Verified service records
-              </p>
-              <h2
-                id="repair-history-title"
-                className="mt-3 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl"
-              >
-                Repair history
-              </h2>
-              <p className="mt-4 max-w-md text-sm leading-6 text-muted sm:text-base sm:leading-7">
-                Each record shows what an authorized repairer attested to. A
-                record does not prove that the physical work occurred.
-              </p>
-
-              <div className="mt-6 flex items-start gap-3 rounded-2xl border border-line bg-surface p-4">
-                <History
-                  aria-hidden="true"
-                  className="mt-0.5 size-5 shrink-0 text-brand"
-                />
-                <p className="text-xs leading-5 text-muted">
-                  {isLivePassport
-                    ? "This timeline was read from the compatible DevicePassport object on Sui Testnet and refreshes automatically."
-                    : "This is illustrative demo history, not a live blockchain record."}
-                </p>
-              </div>
-            </div>
-
-            <ol className="space-y-5">
-              {passport.repairHistory.map((record, index) => (
-                <li
-                  key={record.id}
-                  className="relative rounded-[1.5rem] border border-line bg-surface p-5 shadow-[0_24px_60px_-50px_rgba(21,31,28,0.5)] sm:p-7"
-                >
-                  <div className="flex flex-col gap-4 border-b border-line pb-5 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex items-start gap-3">
-                      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success-soft text-success">
-                        <Wrench aria-hidden="true" className="size-4.5" />
-                      </span>
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand">
-                          Record {passport.repairHistory.length - index}
-                        </p>
-                        <h3 className="mt-1 text-xl font-semibold tracking-[-0.02em]">
-                          {record.repairType}
-                        </h3>
-                      </div>
-                    </div>
-
-                    <time
-                      className="inline-flex min-h-11 items-center gap-2 self-start rounded-full bg-canvas px-3.5 text-xs font-semibold text-muted"
-                      dateTime={record.serviceDate.isoDate}
-                    >
-                      <CalendarDays aria-hidden="true" className="size-4" />
-                      {record.serviceDate.displayDate}
-                    </time>
-                  </div>
-
-                  <p className="mt-5 text-sm leading-6 text-ink/80">
-                    {record.summary}
-                  </p>
-
-                  <dl className="mt-5 grid gap-4 rounded-2xl bg-canvas p-4 sm:grid-cols-2">
-                    <div>
-                      <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                        Attested by
-                      </dt>
-                      <dd className="mt-1.5 text-sm font-semibold">
-                        {record.repairer}
-                      </dd>
-                    </div>
-
-                    <div>
-                      <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                        Condition
-                      </dt>
-                      <dd className="mt-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold">
-                        <span>{record.conditionChange.previous}</span>
-                        <ArrowRight
-                          aria-hidden="true"
-                          className="size-4 text-brand"
-                        />
-                        <span>{record.conditionChange.next}</span>
-                      </dd>
-                    </div>
-
-                    {record.batteryHealth !== undefined && (
-                      <div className="sm:col-span-2">
-                        <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                          Battery health after service
-                        </dt>
-                        <dd className="mt-1.5 flex items-center gap-2 text-sm font-semibold">
-                          <BatteryMedium
-                            aria-hidden="true"
-                            className="size-5 text-success"
-                          />
-                          {record.batteryHealth}%
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-
-                  <div
-                    className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
-                    aria-label={`Resources for ${record.repairType}`}
-                  >
-                    <RecordLink
-                      icon={
-                        <FileCheck2 aria-hidden="true" className="size-4" />
-                      }
-                      resource={record.evidence}
-                    />
-                    <RecordLink
-                      icon={<ScanLine aria-hidden="true" className="size-4" />}
-                      resource={record.transaction}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-
-        <RepairWorkspace
-          passport={passport}
-          onRepairConfirmed={async () => {
-            const result = await passportQuery.refetch();
-
-            if (result.error) {
-              throw result.error;
+        <section className="mb-8" aria-label="Issuer and repairer tools">
+          <h2 className="min-h-11 font-semibold">Issuer and repairer tools</h2>
+          <DeviceRegistration onPassportCreated={updatePassportRoute} />
+          <RepairWorkspace
+            passport={
+              hasResolvedPassport
+                ? passport
+                : passportAdapter.getPublicPassport()
             }
+            onRepairConfirmed={async () => {
+              const result = await passportQuery.refetch();
 
-            return result.data;
-          }}
-        />
+              if (result.error) {
+                throw result.error;
+              }
 
+              return result.data;
+            }}
+          />
+        </section>
         <footer className="border-t border-line pt-6 text-xs leading-5 text-muted">
           Pre-event Sui prototype · live labels appear only after a compatible
           Testnet read. Demo fixtures are explicitly non-live. Physical repair

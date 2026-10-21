@@ -77,3 +77,27 @@ a {
     scroll-behavior: auto;
   }
 }
+
+/* Public surfaces only: transaction forms keep their existing styles. */
+.public-experience {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.public-experience [hidden] {
+  display: none !important;
+}
+.public-experience :where(article, section, div, li, dl, dd) {
+  min-width: 0;
+}
+.public-experience :where(button, a, input):focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .public-experience *,
+  .public-experience *::before,
+  .public-experience *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

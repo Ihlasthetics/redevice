@@ -1,19 +1,13 @@
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import {
   AlertCircle,
   Camera,
   CameraOff,
-  Check,
   CircleCheck,
   ClipboardPaste,
-  KeyRound,
-  LockKeyhole,
   QrCode,
   RotateCcw,
   ScanLine,
-  ShieldCheck,
-  UserRound,
-  Wrench,
 } from "lucide-react";
 import jsQR from "jsqr";
 import {
@@ -26,23 +20,19 @@ import {
 import {
   qrPassportAdapter,
   passportAdapter,
-  repairWorkspaceAdapter,
   type PassportQrResolution,
   type PublicDevicePassport,
 } from "../data/passport-adapter";
 import { loadTestnetPassport } from "../data/sui-passport";
-import { useRepairerAuthorization } from "../hooks/use-repairer-authorization";
 
-type CameraStatus = "idle" | "requesting" | "scanning" | "resolved" | "error";
+type CameraStatus =
+  "idle" | "requesting" | "scanning" | "resolved" | "error" | "loading";
 
 type QrPassportScannerProps = {
+  onLookupRequested?: (objectId: string) => void;
   onPassportResolved: (passport: PublicDevicePassport) => void;
   onDemoRequested: (passport: PublicDevicePassport) => void;
 };
-
-function formatAddress(address: string) {
-  return `${address.slice(0, 8)}…${address.slice(-6)}`;
-}
 
 function cameraErrorMessage(error: unknown) {
   if (error instanceof DOMException) {
@@ -64,18 +54,12 @@ function cameraErrorMessage(error: unknown) {
 
 function QrPassportScanner({
   onPassportResolved,
+  onLookupRequested,
   onDemoRequested,
 }: QrPassportScannerProps) {
   const client = useCurrentClient();
-  const currentAccount = useCurrentAccount();
-  const walletAddress = currentAccount?.address ?? null;
-  const authorizationQuery = useRepairerAuthorization(walletAddress);
-  const authorization = repairWorkspaceAdapter.getAuthorization(
-    walletAddress,
-    authorizationQuery.data,
-    authorizationQuery.error,
-  );
-  const isAuthorizedRepairer = authorization.status === "authorized";
+  const cameraRequest = useRef(0);
+  const lookupRequest = useRef(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -87,6 +71,7 @@ function QrPassportScanner({
   const [pastedPayload, setPastedPayload] = useState("");
 
   const stopCamera = useCallback(() => {
+    cameraRequest.current += 1;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
 
@@ -97,6 +82,7 @@ function QrPassportScanner({
 
   const resolvePayload = useCallback(
     async (payload: string) => {
+      const request = ++lookupRequest.current;
       const deviceId = qrPassportAdapter.readDeviceId(payload);
 
       stopCamera();
@@ -112,8 +98,15 @@ function QrPassportScanner({
         return;
       }
 
+      setCameraStatus("loading");
+      setResolution(null);
+      if (onLookupRequested) {
+        onLookupRequested(deviceId);
+        return;
+      }
       try {
         const resolvedPassport = await loadTestnetPassport(client, deviceId);
+        if (request !== lookupRequest.current) return;
         const nextResolution: PassportQrResolution = {
           status: "matched",
           deviceId: resolvedPassport.id,
@@ -124,6 +117,7 @@ function QrPassportScanner({
         setCameraStatus("resolved");
         onPassportResolved(resolvedPassport);
       } catch (error) {
+        if (request !== lookupRequest.current) return;
         setResolution({
           status: "not-found",
           deviceId,
@@ -135,10 +129,11 @@ function QrPassportScanner({
         setCameraStatus("resolved");
       }
     },
-    [client, onPassportResolved, stopCamera],
+    [client, onPassportResolved, onLookupRequested, stopCamera],
   );
 
   const openDemo = useCallback(() => {
+    lookupRequest.current += 1;
     const demoPassport = passportAdapter.getPublicPassport();
 
     stopCamera();
@@ -153,7 +148,9 @@ function QrPassportScanner({
   }, [onDemoRequested, stopCamera]);
 
   const startCamera = useCallback(async () => {
+    lookupRequest.current += 1;
     stopCamera();
+    const request = cameraRequest.current;
     setResolution(null);
     setCameraMessage(null);
 
@@ -184,6 +181,10 @@ function QrPassportScanner({
           height: { ideal: 720 },
         },
       });
+      if (request !== cameraRequest.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const video = videoRef.current;
 
       if (!video) {
@@ -194,8 +195,10 @@ function QrPassportScanner({
       streamRef.current = stream;
       video.srcObject = stream;
       await video.play();
+      if (request !== cameraRequest.current) return;
       setCameraStatus("scanning");
     } catch (error) {
+      if (request !== cameraRequest.current) return;
       stopCamera();
       setCameraStatus("error");
       setCameraMessage(cameraErrorMessage(error));
@@ -207,10 +210,12 @@ function QrPassportScanner({
       return;
     }
 
+    const request = cameraRequest.current;
     let animationFrame = 0;
     let lastScanAt = 0;
 
     const scanFrame = (timestamp: number) => {
+      if (request !== cameraRequest.current) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
@@ -254,7 +259,13 @@ function QrPassportScanner({
     return () => window.cancelAnimationFrame(animationFrame);
   }, [cameraStatus, resolvePayload]);
 
-  useEffect(() => stopCamera, [stopCamera]);
+  useEffect(
+    () => () => {
+      lookupRequest.current += 1;
+      stopCamera();
+    },
+    [stopCamera],
+  );
 
   const handlePasteSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -264,29 +275,11 @@ function QrPassportScanner({
     }
   };
 
-  const matchedPassport =
-    resolution?.status === "matched" ? resolution.passport : null;
-  const hasRepairerDetails = Boolean(
-    matchedPassport?.repairHistory.some((record) => record.repairerDetails),
-  );
-
-  const accessLabel = isAuthorizedRepairer
-    ? "Authorized repairer"
-    : walletAddress
-      ? authorization.label
-      : "Public viewer";
-
-  const accessExplanation = isAuthorizedRepairer
-    ? "The shared Testnet RepairerCap is active and matches this wallet."
-    : walletAddress
-      ? authorization.explanation
-      : "No wallet is required to scan a device and read its public passport.";
-
   return (
     <section
       id="qr-scanner"
       aria-labelledby="qr-scanner-title"
-      className="mb-10 overflow-hidden rounded-[1.75rem] border border-line bg-surface shadow-[0_30px_80px_-58px_rgba(21,31,28,0.55)] sm:mb-14"
+      className="public-experience mb-10 overflow-hidden rounded-[1.75rem] border border-line bg-surface shadow-[0_30px_80px_-58px_rgba(21,31,28,0.55)] sm:mb-14"
     >
       <div className="grid lg:grid-cols-[0.88fr_1.12fr]">
         <div className="p-5 sm:p-8 lg:p-9">
@@ -307,43 +300,9 @@ function QrPassportScanner({
           </h2>
           <p className="mt-4 max-w-xl text-sm leading-6 text-muted sm:text-base sm:leading-7">
             Point the camera at a ReDevice QR code. The code contains only a
-            device ID; wallet authorization controls which details may be shown.
+            public passport link or device ID. All recorded blockchain
+            information is public; no wallet is required to read it.
           </p>
-
-          <div className="mt-6 rounded-2xl border border-line bg-canvas p-4">
-            <div className="flex items-start gap-3">
-              <span
-                className={`grid size-10 shrink-0 place-items-center rounded-full ${
-                  isAuthorizedRepairer
-                    ? "bg-success-soft text-success"
-                    : "bg-surface text-brand"
-                }`}
-              >
-                {isAuthorizedRepairer ? (
-                  <ShieldCheck aria-hidden="true" className="size-5" />
-                ) : (
-                  <UserRound aria-hidden="true" className="size-5" />
-                )}
-              </span>
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
-                  Current access
-                </p>
-                <p className="mt-1.5 text-sm font-semibold">{accessLabel}</p>
-                {walletAddress && (
-                  <p
-                    className="mt-1 truncate font-mono text-xs text-muted"
-                    title={walletAddress}
-                  >
-                    {formatAddress(walletAddress)}
-                  </p>
-                )}
-                <p className="mt-2 text-xs leading-5 text-muted">
-                  {accessExplanation}
-                </p>
-              </div>
-            </div>
-          </div>
 
           <form className="mt-6" onSubmit={handlePasteSubmit}>
             <label className="text-sm font-semibold" htmlFor="qr-payload-input">
@@ -418,6 +377,12 @@ function QrPassportScanner({
               className="rounded-2xl border border-white/15 bg-ink/85 p-4 text-canvas backdrop-blur-sm"
               aria-live="polite"
             >
+              {cameraStatus === "loading" && (
+                <p role="status">
+                  Loading passport… You can enter another code or choose demo
+                  data.
+                </p>
+              )}
               {cameraStatus === "idle" && (
                 <div className="flex items-start gap-3">
                   <Camera
@@ -552,192 +517,6 @@ function QrPassportScanner({
           </div>
         </div>
       </div>
-
-      {matchedPassport && (
-        <div className="border-t border-line bg-canvas/60 p-5 sm:p-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-success">
-                {matchedPassport.source.kind === "fixture"
-                  ? "Demo passport"
-                  : "Scanned public passport"}
-              </p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-[-0.025em]">
-                {matchedPassport.manufacturer} {matchedPassport.model}
-              </h3>
-              <p className="mt-1 font-mono text-xs text-muted">
-                {matchedPassport.id}
-              </p>
-              {matchedPassport.source.kind === "fixture" && (
-                <p className="mt-2 text-sm font-semibold text-amber-800">
-                  {matchedPassport.source.label}
-                </p>
-              )}
-            </div>
-            <a
-              className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-line bg-surface px-4 text-sm font-semibold transition-colors hover:border-brand hover:text-brand"
-              href="#passport-title"
-            >
-              <Check aria-hidden="true" className="size-4" />
-              View full passport
-            </a>
-          </div>
-
-          <dl className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4">
-            <div className="bg-surface p-4">
-              <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                Masked serial
-              </dt>
-              <dd className="mt-1.5 font-mono text-sm font-semibold">
-                {matchedPassport.maskedSerial}
-              </dd>
-            </div>
-            <div className="bg-surface p-4">
-              <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                Condition
-              </dt>
-              <dd className="mt-1.5 text-sm font-semibold">
-                {matchedPassport.condition}
-              </dd>
-            </div>
-            <div className="bg-surface p-4">
-              <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                Verified records
-              </dt>
-              <dd className="mt-1.5 text-sm font-semibold">
-                {matchedPassport.repairHistory.length}
-              </dd>
-            </div>
-            <div className="bg-surface p-4">
-              <dt className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                Coverage begins
-              </dt>
-              <dd className="mt-1.5 text-sm font-semibold">
-                {matchedPassport.coverageStart.displayDate}
-              </dd>
-            </div>
-          </dl>
-
-          {isAuthorizedRepairer ? (
-            <div className="mt-6 rounded-2xl border border-success/25 bg-success-soft/55 p-5 sm:p-6">
-              <div className="flex items-start gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success text-white">
-                  <Wrench aria-hidden="true" className="size-5" />
-                </span>
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-success">
-                    Repairer-only details
-                  </p>
-                  <h4 className="mt-1.5 text-lg font-semibold">
-                    Technical service data unlocked
-                  </h4>
-                  <p className="mt-1 text-xs leading-5 text-ink/70">
-                    This wallet matches the active RepairerCap stored on Sui
-                    Testnet.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {matchedPassport.repairHistory.map(
-                  (record) =>
-                    record.repairerDetails && (
-                      <article
-                        key={record.id}
-                        className="rounded-xl border border-success/20 bg-surface p-4"
-                      >
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <h5 className="text-sm font-semibold">
-                              {record.repairType}
-                            </h5>
-                            <p className="mt-1 font-mono text-xs text-muted">
-                              {record.repairerDetails.workOrderReference} ·{" "}
-                              {record.repairerDetails.laborMinutes} min
-                            </p>
-                          </div>
-                          <span className="self-start rounded-full bg-canvas px-2.5 py-1 text-[0.68rem] font-semibold text-muted">
-                            {record.id}
-                          </span>
-                        </div>
-
-                        <p className="mt-3 text-xs leading-5 text-ink/75">
-                          {record.repairerDetails.technicianNotes}
-                        </p>
-
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <div>
-                            <p className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                              Diagnostics
-                            </p>
-                            <ul className="mt-1.5 space-y-1 text-xs leading-5 text-ink/75">
-                              {record.repairerDetails.diagnostics.map(
-                                (diagnostic) => (
-                                  <li key={diagnostic}>• {diagnostic}</li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-                          <div>
-                            <p className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
-                              Parts used
-                            </p>
-                            <div className="mt-1.5 text-xs leading-5 text-ink/75">
-                              {record.repairerDetails.partsUsed.length > 0
-                                ? record.repairerDetails.partsUsed.map(
-                                    (part) => (
-                                      <p key={part.reference}>
-                                        {part.quantity}× {part.name} ·{" "}
-                                        <span className="font-mono">
-                                          {part.reference}
-                                        </span>
-                                      </p>
-                                    ),
-                                  )
-                                : "No replacement part recorded."}
-                            </div>
-                          </div>
-                        </div>
-                      </article>
-                    ),
-                )}
-
-                {!hasRepairerDetails && (
-                  <p className="rounded-xl border border-success/20 bg-surface p-4 text-xs leading-5 text-ink/75">
-                    The current Move object stores the public attestation,
-                    repairer address, status transition, battery health, notes,
-                    and evidence reference. No private work-order fields are
-                    stored on-chain.
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-6 flex items-start gap-3 rounded-2xl border border-dashed border-line bg-surface p-5">
-              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-canvas text-brand">
-                <LockKeyhole aria-hidden="true" className="size-5" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold">
-                  Repairer-only details are locked
-                </p>
-                <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted">
-                  {matchedPassport.source.kind === "fixture"
-                    ? "Demo data has no repairer-only or transaction actions. Load a live compatible passport first."
-                    : "Public device information is available now. Connect the authorized Sui Testnet wallet to unlock the repairer workspace."}
-                </p>
-                <a
-                  className="mt-3 inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-brand hover:text-ink"
-                  href="#repair-workspace"
-                >
-                  <KeyRound aria-hidden="true" className="size-4" />
-                  Connect or check a repairer wallet
-                </a>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </section>
   );
 }

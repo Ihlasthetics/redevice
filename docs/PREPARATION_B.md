@@ -7,17 +7,23 @@
   (`origin/main`, inspected after fetching on 21 October 2026).
 - PR #8 is merged, with final head `6cdc52086e634fa0db7f4c06749fabd159588456`.
   It targeted **main**, not developer. PR #9 also merged Akif's follow-up into main.
-  `origin/developer` still points to `e3df9c04a7ec373e78db062e0992b80e26815523`.
-  Using developer alone would omit the required foundation fixes and shared type.
+  The retained local `origin/developer` reference points to
+  `e3df9c04a7ec373e78db062e0992b80e26815523`, without those prerequisites.
+  During PR creation, GitHub rejected `developer` as an invalid base;
+  `git ls-remote --heads origin developer main prep/public-experience` confirmed
+  that **developer no longer exists remotely**. Fetch without pruning had retained
+  the obsolete tracking reference.
 - The new task branch was initially created at the old remote foundations tip
   `fa12ad5`, then fast-forwarded to current main before implementation. No
   existing branch history or local work was reset or discarded.
 - Worktree: `/private/tmp/redevice-public-experience`. The original main checkout
   and its existing uncommitted files were preserved and were not used as inputs.
-- The PR targets developer as requested. Its aggregate diff includes already
-  merged foundation/Akif commits until developer receives main. Review B's changes
-  against the exact implementation base above. Integrate the existing main history
-  into developer before merging B; do not duplicate or cherry-pick those fixes.
+- PR creation targeting developer is blocked by that missing remote branch.
+  The implementation and documentation commits are pushed. Targeting main would
+  give a clean B-only diff, but requires the user's decision because the task
+  explicitly requested developer and prohibited pushing to it. No replacement
+  developer branch was created. Review B's changes against the exact base above;
+  do not duplicate or cherry-pick the integrated foundation/Akif fixes.
 
 ## Delivered behavior
 

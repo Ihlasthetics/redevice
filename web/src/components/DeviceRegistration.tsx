@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   TESTNET_PACKAGE_ID,
   TESTNET_REGISTRAR_CAP_ID,
@@ -25,10 +25,22 @@ import {
   transactionExplorerUrl,
 } from "../constants";
 import { useRegistrarAuthorization } from "../hooks/use-registrar-authorization";
+import { findCreatedPassportId } from "../data/sui-passport";
+import {
+  createSubmissionGuard,
+  isWalletCancellation,
+} from "../lib/transaction-flow";
 import PassportQrDownload from "./PassportQrDownload";
 
 type RegistrationStatus =
-  "ready" | "awaiting-signature" | "confirming" | "confirmed" | "rejected";
+  | "ready"
+  | "awaiting-signature"
+  | "confirming"
+  | "confirmed"
+  | "confirmed-readback-failed"
+  | "cancelled"
+  | "failed"
+  | "unknown";
 
 type DeviceRegistrationProps = {
   onPassportCreated: (objectId: string) => void;
@@ -46,7 +58,7 @@ function formatAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-function errorMessage(error: unknown) {
+function errorMessage(error: unknown, walletRequestStarted: boolean) {
   if (error instanceof Error) {
     if (
       /E_DEVICE_ALREADY_REGISTERED/i.test(error.message) ||
@@ -55,14 +67,18 @@ function errorMessage(error: unknown) {
       return "This device is already registered.";
     }
 
-    if (/rejected|denied|cancel/i.test(error.message)) {
+    if (isWalletCancellation(error)) {
       return "The wallet signature was cancelled. No device was registered.";
     }
 
-    return error.message;
+    return walletRequestStarted
+      ? "The wallet or network did not return a definitive result. Check wallet activity before submitting again."
+      : error.message;
   }
 
-  return "The transaction could not be completed. No device was registered.";
+  return walletRequestStarted
+    ? "The transaction status is unknown. Check wallet activity before submitting again."
+    : "The registration request could not be prepared.";
 }
 
 function RegistrationPassport({
@@ -169,8 +185,59 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
   const [passportId, setPassportId] = useState<string | null>(null);
   const [registeredDevice, setRegisteredDevice] =
     useState<RegisteredDevice | null>(null);
+  const submissionGuard = useRef(createSubmissionGuard());
 
   const isBusy = status === "awaiting-signature" || status === "confirming";
+  const showAuthorizationError =
+    Boolean(walletAddress) && authorizationQuery.isError;
+  const showUnauthorized =
+    Boolean(walletAddress) &&
+    !authorizationQuery.isPending &&
+    !authorizationQuery.isError &&
+    !isIssuer;
+  const showRegistrationForm =
+    Boolean(walletAddress) &&
+    !authorizationQuery.isPending &&
+    !authorizationQuery.isError &&
+    isIssuer;
+
+  async function resolveCreatedPassport(
+    transactionDigest: string,
+    device: RegisteredDevice,
+  ) {
+    setStatus("confirming");
+
+    try {
+      const finalResult = await client.core.waitForTransaction({
+        digest: transactionDigest,
+        timeout: 60_000,
+        include: { effects: true },
+      });
+      const createdPassportId = await findCreatedPassportId(
+        client,
+        finalResult.Transaction?.effects?.changedObjects ?? [],
+      );
+
+      if (!createdPassportId) {
+        throw new Error(
+          "Sui confirmed the transaction, but its new DevicePassport could not be identified. Open the transaction in SuiVision before retrying.",
+        );
+      }
+
+      setPassportId(createdPassportId);
+      setRegisteredDevice(device);
+      setStatus("confirmed");
+      setError(null);
+      onPassportCreated(createdPassportId);
+    } catch (readbackError) {
+      setStatus("confirmed-readback-failed");
+      setError(
+        readbackError instanceof Error
+          ? readbackError.message
+          : "The transaction was confirmed, but its created passport could not be read back.",
+      );
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -180,7 +247,7 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
     setRegisteredDevice(null);
 
     if (!walletAddress || !isIssuer) {
-      setStatus("rejected");
+      setStatus("failed");
       setError(
         "Connect an authorized issuer wallet with an active RegistrarCap.",
       );
@@ -193,16 +260,22 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
     const normalizedSerial = normalizeSerial(serialNumber);
 
     if (!safeDeviceName || !safeBrand || !safeModel) {
-      setStatus("rejected");
+      setStatus("failed");
       setError("Add a device name, brand, and model.");
       return;
     }
 
     if (normalizedSerial.length < 6 || normalizedSerial.length > 64) {
-      setStatus("rejected");
+      setStatus("failed");
       setError("Enter a valid serial number between 6 and 64 characters.");
       return;
     }
+
+    if (!submissionGuard.current.tryStart()) {
+      return;
+    }
+
+    let walletRequestStarted = false;
 
     try {
       const serialHash = await sha256AsSuiAddress(normalizedSerial);
@@ -242,49 +315,42 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
       }
 
       setStatus("awaiting-signature");
+      walletRequestStarted = true;
       const transaction = createTransaction();
       const result = await dAppKit.signAndExecuteTransaction({ transaction });
 
       if (result.FailedTransaction) {
-        throw new Error(
+        setDigest(result.FailedTransaction.digest);
+        setStatus("failed");
+        setError(
           result.FailedTransaction.status.error?.message ??
-            "Sui rejected the registration transaction.",
+            "Sui reported a failed registration transaction.",
         );
+        return;
       }
 
       const transactionDigest = result.Transaction.digest;
       setDigest(transactionDigest);
-      setStatus("confirming");
-
-      const finalResult = await client.core.waitForTransaction({
-        digest: transactionDigest,
-        timeout: 60_000,
-        include: { effects: true },
-      });
-      const createdPassportId =
-        finalResult.Transaction?.effects?.changedObjects.find(
-          (object) => object.idOperation === "Created",
-        )?.objectId ?? null;
-
-      if (!createdPassportId) {
-        throw new Error(
-          "Sui confirmed the transaction, but the new passport ID was not returned. Open the transaction in SuiVision.",
-        );
-      }
-
-      setPassportId(createdPassportId);
-      setRegisteredDevice({
+      const device = {
         deviceName: safeDeviceName,
         brand: safeBrand,
         model: safeModel,
         maskedSerial: safeMaskedSerial,
         registeredAt,
-      });
-      setStatus("confirmed");
-      onPassportCreated(createdPassportId);
+      };
+      setRegisteredDevice(device);
+      await resolveCreatedPassport(transactionDigest, device);
     } catch (transactionError) {
-      setStatus("rejected");
-      setError(errorMessage(transactionError));
+      setStatus(
+        isWalletCancellation(transactionError)
+          ? "cancelled"
+          : walletRequestStarted
+            ? "unknown"
+            : "failed",
+      );
+      setError(errorMessage(transactionError, walletRequestStarted));
+    } finally {
+      submissionGuard.current.finish();
     }
   }
 
@@ -301,7 +367,7 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
               Authorized issuers
             </p>
             <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-canvas/70">
-              Sui Testnet live
+              Sui Testnet
             </span>
           </div>
           <h2
@@ -380,7 +446,27 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
             </div>
           )}
 
-          {walletAddress && !authorizationQuery.isPending && !isIssuer && (
+          {showAuthorizationError && (
+            <div
+              className="flex min-h-72 flex-col items-start justify-center"
+              role="alert"
+            >
+              <span className="grid size-12 place-items-center rounded-2xl bg-amber-50 text-amber-800">
+                <LockKeyhole aria-hidden="true" className="size-5" />
+              </span>
+              <h3 className="mt-5 text-xl font-semibold">
+                Registrar check unavailable
+              </h3>
+              <p className="mt-2 max-w-lg text-sm leading-6 text-muted">
+                {authorizationQuery.error instanceof Error
+                  ? authorizationQuery.error.message
+                  : "Sui Testnet could not confirm this wallet's permission."}{" "}
+                Signing remains disabled; this is not a permission denial.
+              </p>
+            </div>
+          )}
+
+          {showUnauthorized && (
             <div
               className="flex min-h-72 flex-col items-start justify-center"
               role="status"
@@ -392,7 +478,7 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                 Connected wallet
               </p>
               <p className="mt-2 font-mono text-sm font-semibold">
-                {formatAddress(walletAddress)}
+                {formatAddress(walletAddress!)}
               </p>
               <h3 className="mt-5 text-xl font-semibold">
                 Issuer permission required
@@ -408,7 +494,7 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
             </div>
           )}
 
-          {walletAddress && !authorizationQuery.isPending && isIssuer && (
+          {showRegistrationForm && (
             <form onSubmit={handleSubmit}>
               <div className="flex items-start gap-3 border-b border-line pb-5">
                 <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success-soft text-success">
@@ -420,9 +506,9 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   </p>
                   <p
                     className="mt-1 font-mono text-xs text-muted"
-                    title={walletAddress}
+                    title={walletAddress ?? undefined}
                   >
-                    {formatAddress(walletAddress)}
+                    {formatAddress(walletAddress!)}
                   </p>
                 </div>
               </div>
@@ -497,10 +583,10 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                       setInitialCondition(event.target.value)
                     }
                   >
-                    <option value="0">Inspected</option>
-                    <option value="1">Refurbished</option>
-                    <option value="2">In service</option>
-                    <option value="3">Retired</option>
+                    <option value="0">Used</option>
+                    <option value="1">Repaired</option>
+                    <option value="2">Refurbished</option>
+                    <option value="3">Parts only</option>
                   </select>
                 </label>
               </div>
@@ -528,19 +614,49 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   />
                 )}
 
-              {status === "rejected" && error && (
+              {status !== "confirmed" && error && (
                 <div
-                  className="mt-5 rounded-2xl border border-red-700/20 bg-red-50 p-4 text-sm text-red-950"
-                  role="alert"
+                  className={`mt-5 rounded-2xl border p-4 text-sm ${
+                    status === "confirmed-readback-failed"
+                      ? "border-amber-700/20 bg-amber-50 text-amber-950"
+                      : "border-red-700/20 bg-red-50 text-red-950"
+                  }`}
+                  role={
+                    status === "confirmed-readback-failed" ? "status" : "alert"
+                  }
                 >
-                  {error}
+                  <p>{error}</p>
+                  {digest && (
+                    <a
+                      className="mt-3 inline-flex min-h-11 items-center gap-2 font-semibold text-brand"
+                      href={transactionExplorerUrl(digest)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View transaction
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  )}
+                  {status === "confirmed-readback-failed" &&
+                    digest &&
+                    registeredDevice && (
+                      <button
+                        className="ml-4 min-h-11 font-semibold text-brand"
+                        type="button"
+                        onClick={() =>
+                          void resolveCreatedPassport(digest, registeredDevice)
+                        }
+                      >
+                        Retry passport lookup
+                      </button>
+                    )}
                 </div>
               )}
 
               <button
                 className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink px-5 text-sm font-semibold text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 type="submit"
-                disabled={isBusy}
+                disabled={isBusy || status === "confirmed-readback-failed"}
               >
                 {status === "confirmed" ? (
                   <CheckCircle2 aria-hidden="true" className="size-4" />
@@ -556,7 +672,9 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                     ? "Confirming on Sui"
                     : status === "confirmed"
                       ? "Register another device"
-                      : "Sign and register device"}
+                      : status === "confirmed-readback-failed"
+                        ? "Transaction confirmed — retry lookup"
+                        : "Sign and register device"}
               </button>
             </form>
           )}

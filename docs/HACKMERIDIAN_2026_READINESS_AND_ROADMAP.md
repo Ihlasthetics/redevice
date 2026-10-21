@@ -6,6 +6,12 @@
 **Documentation branch:** `developer`
 **Audit type:** read-only application and event audit plus implementation planning; no application, dependency, contract, or deployment changes
 
+> **Remediation note — 15 October 2026:** the audit evidence below remains a
+> historical snapshot of the audited commit. Scoped pre-event reliability fixes
+> were implemented later on `fix/pre-hackathon-foundations`; see
+> [PRE_HACKATHON_FIXES.md](PRE_HACKATHON_FIXES.md). This note does not rewrite
+> the original failures as audit-time passes.
+
 > **Preparation update — 18 October 2026:** this audit remains a historical snapshot of the audited commit. The two-person plan below covers pre-hackathon improvements only, not a Stellar implementation. The separate `fix/pre-hackathon-foundations` branch contains reliability fixes awaiting review and integration.
 
 ## Pre-hackathon two-person execution plan

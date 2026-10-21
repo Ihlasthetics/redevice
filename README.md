@@ -104,7 +104,7 @@ redevice/
 
 ## Requirements
 
-- Node.js 22.12 or newer
+- Node.js 22.22.2 (the CI version)
 - npm 11 or newer
 - Sui CLI configured for testnet (only for Move development)
 - a Sui-compatible wallet with testnet enabled (only for authorized actions)
@@ -119,6 +119,12 @@ Install the committed workspace dependency graph and start the frontend:
 npm ci
 npm run dev
 ```
+
+Run both commands from the repository root. The default Vite URL is
+`http://localhost:5173`. For a wallet-free walkthrough, use the clearly labeled
+demo fixture; it cannot create or update a passport. A live read requires a
+compatible Sui Testnet package/passport pair. Authorized writes additionally
+require the matching active capability, registry, and wallet on Testnet.
 
 Create an optional `web/.env.local` file to override the checked-in testnet defaults:
 
@@ -136,6 +142,11 @@ VITE_PUBLIC_APP_ORIGIN=https://your-deployed-app.example
 
 `VITE_PUBLIC_APP_ORIGIN` is optional. Without it, QR codes use the current page
 origin; localhost QR codes are clearly warned as unusable from another device.
+For phone QR testing, set it to a reachable HTTPS deployment, not localhost.
+All `VITE_` values are visible in the browser build: use public object IDs only,
+never secrets or wallet recovery material. See
+[`docs/PREPARATION_A.md`](docs/PREPARATION_A.md) for read-only configuration
+checks and manual wallet scenarios.
 
 ## Validate the project
 

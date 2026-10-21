@@ -12,8 +12,12 @@ import {
   WalletCards,
   Wrench,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { TESTNET_PACKAGE_ID, TESTNET_REPAIRER_CAP_ID } from "../constants";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import {
+  TESTNET_PACKAGE_ID,
+  TESTNET_REPAIRER_CAP_ID,
+  transactionExplorerUrl,
+} from "../constants";
 import {
   lifecycleConditionToCode,
   repairWorkspaceAdapter,
@@ -38,7 +42,7 @@ type RepairWorkspaceProps = {
 };
 
 type RepairProof = {
-  status: TransactionStatus;
+  status: "confirmed-refreshing" | "confirmed" | "confirmed-refresh-failed";
   digest: string;
   error: string | null;
 };
@@ -61,10 +65,11 @@ function RepairWorkspace({
   const [nextCondition, setNextCondition] = useState(
     workspace.defaultNextCondition,
   );
-  const [batteryHealth, setBatteryHealth] = useState("96");
-  const [notes, setNotes] = useState(
-    "Battery replaced and full diagnostic completed",
-  );
+  const [batteryHealth, setBatteryHealth] = useState("");
+  const [notes, setNotes] = useState("");
+  const [reviewed, setReviewed] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [activeSubmission, setActiveSubmission] = useState(false);
   const [transactionStatus, setTransactionStatus] =
     useState<TransactionStatus>("ready");
   const [transactionDigest, setTransactionDigest] = useState<string | null>(
@@ -84,24 +89,30 @@ function RepairWorkspace({
     passport.source.kind === "fixture" ? passport.source.label : null;
   const isAuthorized = isLivePassport && authorization.status === "authorized";
   const isBusy =
+    activeSubmission ||
     transactionStatus === "awaiting-signature" ||
     transactionStatus === "submitting" ||
     transactionStatus === "confirmed-refreshing";
+  const previousProof = proofsByPassport.current.get(scopeKey);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    currentScope.current = scopeKey;
     operationVersion.current += 1;
     readbackAbortController.current?.abort();
     readbackAbortController.current = null;
     setRepairType(workspace.defaultRepairType);
     setNextCondition(workspace.defaultNextCondition);
-    setBatteryHealth("96");
-    setNotes("Battery replaced and full diagnostic completed");
+    setBatteryHealth("");
+    setNotes("");
+    setReviewed(false);
+    setLocalError(null);
     const proof = proofsByPassport.current.get(scopeKey);
     setTransactionStatus(proof?.status ?? "ready");
     setTransactionDigest(proof?.digest ?? null);
     setTransactionError(proof?.error ?? null);
 
     return () => {
+      currentScope.current = "unmounted";
       operationVersion.current += 1;
       readbackAbortController.current?.abort();
       readbackAbortController.current = null;
@@ -110,9 +121,15 @@ function RepairWorkspace({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (transactionStatus === "confirmed-refresh-failed") {
+      setLocalError(
+        "Refresh the confirmed passport before adding another repair.",
+      );
+      return;
+    }
+
     if (!walletAddress || !isAuthorized) {
-      setTransactionStatus("failed");
-      setTransactionError(
+      setLocalError(
         isLivePassport
           ? "Connect a wallet whose permission check has succeeded before submitting."
           : "Transactions are disabled for demo data. Load a compatible live passport first.",
@@ -127,17 +144,20 @@ function RepairWorkspace({
       measuredBatteryHealth < 0 ||
       measuredBatteryHealth > 100
     ) {
-      setTransactionStatus("failed");
-      setTransactionError(
-        "Battery health must be a whole number from 0 to 100.",
-      );
+      setLocalError("Battery health must be a whole number from 0 to 100.");
       return;
     }
 
     const publicNotes = notes.trim();
     if (!publicNotes) {
-      setTransactionStatus("failed");
-      setTransactionError("Add a short public repair summary.");
+      setLocalError("Add a short public repair summary.");
+      return;
+    }
+
+    if (!reviewed) {
+      setLocalError(
+        "Review the selected device and public repair details before signing.",
+      );
       return;
     }
 
@@ -147,6 +167,9 @@ function RepairWorkspace({
 
     setTransactionDigest(null);
     setTransactionError(null);
+    setTransactionStatus("ready");
+    setLocalError(null);
+    setActiveSubmission(true);
     const operationId = ++operationVersion.current;
     const submittedScope = scopeKey;
     readbackAbortController.current?.abort();
@@ -158,6 +181,19 @@ function RepairWorkspace({
       readbackAbortController.current === abortController;
 
     try {
+      const latestAuthorization = await authorizationQuery.refetch();
+      if (!isCurrentOperation()) {
+        return;
+      }
+      if (latestAuthorization.error || latestAuthorization.data !== true) {
+        setLocalError(
+          latestAuthorization.error instanceof Error
+            ? latestAuthorization.error.message
+            : "Repairer permission is no longer confirmed. Refresh authorization before signing.",
+        );
+        return;
+      }
+
       const transaction = new Transaction();
       transaction.moveCall({
         target: `${TESTNET_PACKAGE_ID}::redevice::add_repair_record`,
@@ -177,7 +213,14 @@ function RepairWorkspace({
       setTransactionStatus("awaiting-signature");
       const outcome = await runConfirmedWrite({
         execute: () => dAppKit.signAndExecuteTransaction({ transaction }),
-        refresh: onRepairConfirmed,
+        refresh: () => {
+          if (!isCurrentOperation()) {
+            throw new Error(
+              "The passport changed before readback. Refresh the original device to verify the confirmed repair.",
+            );
+          }
+          return onRepairConfirmed();
+        },
         onConfirmed: (digest) => {
           proofsByPassport.current.set(submittedScope, {
             status: "confirmed-refreshing",
@@ -195,7 +238,11 @@ function RepairWorkspace({
         signal: abortController.signal,
       });
 
-      if (outcome.digest) {
+      if (
+        outcome.digest &&
+        (outcome.status === "confirmed" ||
+          outcome.status === "confirmed-refresh-failed")
+      ) {
         proofsByPassport.current.set(submittedScope, {
           status: outcome.status,
           digest: outcome.digest,
@@ -207,8 +254,21 @@ function RepairWorkspace({
         setTransactionStatus(outcome.status);
         setTransactionDigest(outcome.digest);
         setTransactionError("error" in outcome ? outcome.error : null);
+      } else if (currentScope.current === submittedScope && outcome.digest) {
+        setTransactionStatus(outcome.status);
+        setTransactionDigest(outcome.digest);
+        setTransactionError("error" in outcome ? outcome.error : null);
+      }
+    } catch (error) {
+      if (isCurrentOperation()) {
+        setLocalError(
+          error instanceof Error
+            ? error.message
+            : "The repair request could not be prepared.",
+        );
       }
     } finally {
+      setActiveSubmission(false);
       if (readbackAbortController.current === abortController) {
         readbackAbortController.current = null;
       }
@@ -217,6 +277,11 @@ function RepairWorkspace({
   }
 
   async function handleRefreshRetry() {
+    if (!transactionDigest || !submissionGuard.current.tryStart()) {
+      return;
+    }
+
+    setActiveSubmission(true);
     const retryScope = scopeKey;
     const retryDigest = transactionDigest;
     const operationId = ++operationVersion.current;
@@ -232,9 +297,19 @@ function RepairWorkspace({
     setTransactionError(null);
 
     try {
-      await retryConfirmedRefresh(onRepairConfirmed, {
-        signal: abortController.signal,
-      });
+      await retryConfirmedRefresh(
+        () => {
+          if (!isCurrentOperation()) {
+            throw new Error(
+              "The passport changed before readback. Refresh the original device to verify the confirmed repair.",
+            );
+          }
+          return onRepairConfirmed();
+        },
+        {
+          signal: abortController.signal,
+        },
+      );
       if (retryDigest) {
         proofsByPassport.current.set(retryScope, {
           status: "confirmed",
@@ -243,6 +318,9 @@ function RepairWorkspace({
         });
       }
       if (isCurrentOperation()) {
+        setTransactionStatus("confirmed");
+        setTransactionError(null);
+      } else if (currentScope.current === retryScope) {
         setTransactionStatus("confirmed");
         setTransactionError(null);
       }
@@ -261,8 +339,13 @@ function RepairWorkspace({
       if (isCurrentOperation()) {
         setTransactionStatus("confirmed-refresh-failed");
         setTransactionError(message);
+      } else if (currentScope.current === retryScope) {
+        setTransactionStatus("confirmed-refresh-failed");
+        setTransactionError(message);
       }
     } finally {
+      submissionGuard.current.finish();
+      setActiveSubmission(false);
       if (readbackAbortController.current === abortController) {
         readbackAbortController.current = null;
       }
@@ -366,6 +449,17 @@ function RepairWorkspace({
                   </span>
                 </ConnectButton>
               </div>
+              {walletAddress &&
+                (authorization.status === "unavailable" ||
+                  authorization.status === "invalid-config") && (
+                  <button
+                    className="mt-3 min-h-11 text-sm font-semibold text-brand"
+                    type="button"
+                    onClick={() => void authorizationQuery.refetch()}
+                  >
+                    Retry authorization check
+                  </button>
+                )}
             </div>
           </div>
         </div>
@@ -459,13 +553,19 @@ function RepairWorkspace({
               </div>
             </div>
 
-            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <fieldset
+              disabled={isBusy}
+              className="mt-6 grid gap-5 sm:grid-cols-2"
+            >
               <label className="block text-sm font-semibold">
                 Repair type
                 <select
                   className="mt-2 min-h-12 w-full rounded-xl border border-line bg-canvas px-3.5 text-sm font-medium text-ink"
                   value={repairType}
-                  onChange={(event) => setRepairType(event.target.value)}
+                  onChange={(event) => {
+                    setRepairType(event.target.value);
+                    setReviewed(false);
+                  }}
                 >
                   {workspace.repairTypes.map((type) => (
                     <option key={type}>{type}</option>
@@ -490,7 +590,10 @@ function RepairWorkspace({
                     placeholder="96"
                     aria-describedby="battery-health-hint"
                     value={batteryHealth}
-                    onChange={(event) => setBatteryHealth(event.target.value)}
+                    onChange={(event) => {
+                      setBatteryHealth(event.target.value);
+                      setReviewed(false);
+                    }}
                   />
                   <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">
                     %
@@ -518,9 +621,12 @@ function RepairWorkspace({
                 <select
                   className="mt-2 min-h-12 w-full rounded-xl border border-line bg-canvas px-3.5 text-sm font-medium text-ink"
                   value={nextCondition}
-                  onChange={(event) =>
-                    setNextCondition(event.target.value as typeof nextCondition)
-                  }
+                  onChange={(event) => {
+                    setNextCondition(
+                      event.target.value as typeof nextCondition,
+                    );
+                    setReviewed(false);
+                  }}
                 >
                   {workspace.lifecycleConditions.map((condition) => (
                     <option key={condition}>{condition}</option>
@@ -535,14 +641,29 @@ function RepairWorkspace({
                   placeholder="Describe the work completed and the checks performed."
                   maxLength={500}
                   value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
+                  onChange={(event) => {
+                    setNotes(event.target.value);
+                    setReviewed(false);
+                  }}
                   required
                 />
                 <span className="mt-1.5 block text-xs font-normal leading-5 text-muted">
                   Public summary · maximum 500 characters
                 </span>
               </label>
-            </div>
+            </fieldset>
+
+            <label className="mt-5 flex items-start gap-3 text-xs leading-5 text-muted">
+              <input
+                className="mt-1"
+                type="checkbox"
+                checked={reviewed}
+                disabled={isBusy}
+                onChange={(event) => setReviewed(event.target.checked)}
+              />
+              I reviewed the selected device and the public repair type,
+              condition, battery reading, and notes.
+            </label>
 
             <fieldset
               className="mt-6 rounded-2xl border border-line p-4 sm:p-5"
@@ -580,16 +701,34 @@ function RepairWorkspace({
               </div>
             </div>
 
+            {localError && (
+              <p className="mt-5 text-sm text-red-800" role="alert">
+                {localError}
+              </p>
+            )}
+
             <TransactionStatusPreview
               status={transactionStatus}
               digest={transactionDigest}
               error={transactionError}
             />
 
+            {previousProof && previousProof.digest !== transactionDigest && (
+              <a
+                className="mt-3 inline-flex min-h-11 items-center text-xs font-semibold text-brand"
+                href={transactionExplorerUrl(previousProof.digest)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View earlier confirmed repair transaction
+              </a>
+            )}
+
             {transactionStatus === "confirmed-refresh-failed" && (
               <button
                 className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl border border-line bg-canvas px-4 text-xs font-semibold text-brand"
                 type="button"
+                disabled={isBusy}
                 onClick={() => void handleRefreshRetry()}
               >
                 Retry passport refresh
@@ -599,7 +738,11 @@ function RepairWorkspace({
             <button
               className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink px-5 text-sm font-semibold text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               type="submit"
-              disabled={!isAuthorized || isBusy}
+              disabled={
+                !isAuthorized ||
+                isBusy ||
+                transactionStatus === "confirmed-refresh-failed"
+              }
             >
               {transactionStatus === "confirmed" ? (
                 <CheckCircle2 aria-hidden="true" className="size-4" />
@@ -611,13 +754,15 @@ function RepairWorkspace({
               )}
               {transactionStatus === "confirmed-refreshing"
                 ? "Refreshing passport"
-                : isBusy
-                  ? "Waiting for Sui"
-                  : transactionStatus === "confirmed"
-                    ? "Submit another repair"
-                    : isAuthorized
-                      ? "Sign and add repair record"
-                      : "Authorized wallet required"}
+                : transactionStatus === "confirmed-refresh-failed"
+                  ? "Refresh passport before another repair"
+                  : isBusy
+                    ? "Waiting for Sui"
+                    : transactionStatus === "confirmed"
+                      ? "Submit another repair"
+                      : isAuthorized
+                        ? "Sign and add repair record"
+                        : "Authorized wallet required"}
             </button>
           </form>
         </div>

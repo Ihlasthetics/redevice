@@ -2,6 +2,14 @@
 
 ## Branch ownership
 
+For the pre-HackMeridian preparation split, Akif owns transaction/data files
+and Yhlas owns public UI/scanner files. Follow
+[`docs/PRE_HACKATHON_TWO_PERSON_WORK_PLAN.md`](docs/PRE_HACKATHON_TWO_PERSON_WORK_PLAN.md)
+instead of the historical branch names below. Use separate worktrees; do not
+let two AI sessions edit the same checkout. Start from the same reviewed base,
+keep exported contracts stable, and merge Akif's work before Yhlas's into
+`developer`.
+
 - Contract work: `contract/move`
 - Frontend work: `frontend/ui`
 - Stable, reviewed work: `main`
@@ -49,6 +57,8 @@ git status
 git diff
 npm run typecheck
 npm run build
+npm test
+npm run format:check
 ```
 
 Move changes must also run:

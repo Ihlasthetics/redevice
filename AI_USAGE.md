@@ -43,6 +43,24 @@ Human verification:
 Prompts that materially direct implementation belong in `specs/prompts/`. Never
 include secrets or wallet recovery information in prompts or commits.
 
+## Akif pre-hackathon preparation
+
+Date: 21 October 2026
+
+Tool: ChatGPT Codex
+
+Human direction and decisions: The team requested Akif's pre-hackathon tasks
+one at a time, with validation and simplification before moving on. Stellar,
+Move deployment changes, live signing, and Yhlas's public UI work remain out of
+scope.
+
+Files assisted: Akif-owned data, registration, repair, authorization, and test
+files; `README.md`, `CONTRIBUTING.md`, `docs/PREPARATION_A.md`, and this disclosure.
+
+Human verification: Mocked automated checks are run locally. Human review,
+compatible live Testnet configuration, and real wallet/phone checks remain
+pending; no real transaction is signed in this preparation work.
+
 ## Public passport layout
 
 Date: 25 July 2026

@@ -84,6 +84,13 @@ export async function loadTestnetPassport(
       },
     });
 
+    if (!object) {
+      throw new PassportDataError(
+        "missing-or-incompatible",
+        "The passport was not found on Sui Testnet.",
+      );
+    }
+
     return passportAdapter.fromSuiObject(object);
   } catch (error) {
     throw classifyReadFailure(error, "the passport");
@@ -105,7 +112,7 @@ export async function findCreatedPassportId(
       objectId: changedObject.objectId,
     });
 
-    if (object.type?.toLowerCase() === passportType) {
+    if (object?.type?.toLowerCase() === passportType) {
       return changedObject.objectId;
     }
   }
@@ -125,6 +132,13 @@ export async function checkRepairerAuthorization(
       objectId: TESTNET_REPAIRER_CAP_ID,
       include: { json: true },
     });
+
+    if (!object) {
+      throw new PassportDataError(
+        "missing-or-incompatible",
+        "The configured RepairerCap was not found on Sui Testnet.",
+      );
+    }
 
     assertObjectType(object.type, "RepairerCap", "Repairer capability");
 
@@ -172,6 +186,13 @@ export async function checkRegistrarAuthorization(
       objectId: TESTNET_REGISTRAR_CAP_ID,
       include: { json: true },
     });
+
+    if (!object) {
+      throw new PassportDataError(
+        "missing-or-incompatible",
+        "The configured RegistrarCap was not found on Sui Testnet.",
+      );
+    }
 
     assertObjectType(object.type, "RegistrarCap", "Registrar capability");
 

@@ -48,6 +48,10 @@ export type RepairRecord = {
     isoDate: string;
     displayDate: string;
   };
+  attestedAt?: {
+    isoDate: string;
+    displayDate: string;
+  };
   repairType: string;
   summary: string;
   repairer: string;
@@ -176,7 +180,7 @@ type SuiObjectJson = {
 };
 
 type OnchainRepair = {
-  attested_at_ms: string | number;
+  attested_at_ms?: string | number;
   battery_health: string | number;
   evidence_blob_id: string;
   new_status: string | number;
@@ -197,18 +201,24 @@ const lifecycleConditions: LifecycleCondition[] = [
 export function lifecycleConditionFromCode(
   value: string | number,
 ): LifecycleCondition {
-  const index = Number(value);
-  return lifecycleConditions[index] ?? "Used";
+  const index = unsignedInteger(value, "lifecycle status", 3);
+  return lifecycleConditions[index];
 }
 
 export function lifecycleConditionToCode(value: LifecycleCondition): number {
   const index = lifecycleConditions.indexOf(value);
-  return index < 0 ? 0 : index;
+  if (index < 0) {
+    throw new Error("The selected lifecycle condition is not supported.");
+  }
+  return index;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("The Sui object does not contain readable Move fields.");
+    throw new PassportDataError(
+      "missing-or-incompatible",
+      "The Sui object does not contain readable Move fields.",
+    );
   }
 
   return value as Record<string, unknown>;
@@ -217,30 +227,61 @@ function asRecord(value: unknown): Record<string, unknown> {
 function requiredString(fields: Record<string, unknown>, key: string): string {
   const value = fields[key];
 
-  if (typeof value !== "string") {
-    throw new Error(`The passport is missing its ${key} field.`);
+  if (typeof value !== "string" || !value.trim()) {
+    throw new PassportDataError(
+      "missing-or-incompatible",
+      `The passport is missing a valid ${key} field.`,
+    );
   }
 
   return value;
 }
 
-function optionalString(
-  fields: Record<string, unknown>,
-  key: string,
-): string | null {
-  const value = fields[key];
-  return typeof value === "string" && value.trim() ? value : null;
+function requiredAddress(fields: Record<string, unknown>, key: string): string {
+  const address = requiredString(fields, key);
+  if (!/^0x[0-9a-f]{1,64}$/i.test(address)) {
+    throw new PassportDataError(
+      "missing-or-incompatible",
+      `The passport contains an invalid ${key} address.`,
+    );
+  }
+  return address;
 }
 
 function formatAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-function formatDate(timestamp: string | number) {
-  const date = new Date(Number(timestamp));
+function unsignedInteger(value: unknown, label: string, maximum?: number) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value)
+        ? Number(value)
+        : NaN;
+
+  if (
+    !Number.isSafeInteger(numericValue) ||
+    numericValue < 0 ||
+    (maximum !== undefined && numericValue > maximum)
+  ) {
+    throw new PassportDataError(
+      "missing-or-incompatible",
+      `The passport contains an invalid ${label}.`,
+    );
+  }
+
+  return numericValue;
+}
+
+function formatDate(timestamp: unknown) {
+  const date = new Date(unsignedInteger(timestamp, "timestamp"));
 
   if (Number.isNaN(date.getTime())) {
-    throw new Error("The passport contains an invalid timestamp.");
+    throw new PassportDataError(
+      "missing-or-incompatible",
+      "The passport contains an invalid timestamp.",
+    );
   }
 
   return {
@@ -266,10 +307,6 @@ function inferCategory(model: string) {
   }
 
   return "Electronic device";
-}
-
-function inferBrand(model: string) {
-  return /macbook|iphone|ipad|apple/i.test(model) ? "Apple" : "Unknown brand";
 }
 
 function maskSerial(serial: string) {
@@ -304,21 +341,46 @@ function evidenceLink(reference: string): RepairRecordLink {
   };
 }
 
-function isOnchainRepair(value: unknown): value is OnchainRepair {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
+function parseOnchainRepair(value: unknown): OnchainRepair {
+  const fields = asRecord(value);
+  const notes = fields.notes;
+  const evidence = fields.evidence_blob_id;
+
+  if (typeof notes !== "string" || typeof evidence !== "string") {
+    throw new PassportDataError(
+      "missing-or-incompatible",
+      "A repair record has malformed public notes or evidence.",
+    );
   }
 
-  const repair = value as Partial<OnchainRepair>;
-  return (
-    typeof repair.repair_type === "string" &&
-    typeof repair.notes === "string" &&
-    typeof repair.repairer === "string" &&
-    typeof repair.evidence_blob_id === "string" &&
-    repair.serviced_at_ms !== undefined &&
-    repair.previous_status !== undefined &&
-    repair.new_status !== undefined
-  );
+  const repair = {
+    repair_type: requiredString(fields, "repair_type"),
+    notes,
+    repairer: requiredAddress(fields, "repairer"),
+    evidence_blob_id: evidence,
+    serviced_at_ms: unsignedInteger(fields.serviced_at_ms, "service timestamp"),
+    attested_at_ms:
+      fields.attested_at_ms === undefined
+        ? undefined
+        : unsignedInteger(fields.attested_at_ms, "attestation timestamp"),
+    previous_status: unsignedInteger(
+      fields.previous_status,
+      "previous status",
+      3,
+    ),
+    new_status: unsignedInteger(fields.new_status, "new status", 3),
+    battery_health: unsignedInteger(
+      fields.battery_health,
+      "battery health",
+      100,
+    ),
+  };
+
+  formatDate(repair.serviced_at_ms);
+  if (repair.attested_at_ms !== undefined) {
+    formatDate(repair.attested_at_ms);
+  }
+  return repair;
 }
 
 const fallbackPassport: PublicDevicePassport = {
@@ -501,32 +563,43 @@ export const passportAdapter = {
 
     const fields = asRecord(object.json);
     const model = requiredString(fields, "model");
-    const manufacturer = requiredString(fields, "manufacturer");
-    const repairs = Array.isArray(fields.repairs)
-      ? fields.repairs.filter(isOnchainRepair)
-      : [];
+    const manufacturer = requiredAddress(fields, "manufacturer");
+    if (!Array.isArray(fields.repairs)) {
+      throw new PassportDataError(
+        "missing-or-incompatible",
+        "The passport is missing a valid repairs field.",
+      );
+    }
+    const repairs = fields.repairs.map(parseOnchainRepair);
     const lastRepairIndex = repairs.length - 1;
+    const verificationLevel = unsignedInteger(
+      fields.verification_level,
+      "verification level",
+      255,
+    );
+    if (verificationLevel !== 1 && verificationLevel !== 2) {
+      throw new PassportDataError(
+        "missing-or-incompatible",
+        "The passport contains an unknown verification level.",
+      );
+    }
 
     return {
       id: object.objectId,
       manufacturer: formatAddress(manufacturer),
-      deviceName: optionalString(fields, "device_name") ?? model,
-      brand: optionalString(fields, "brand") ?? inferBrand(model),
+      deviceName: requiredString(fields, "device_name"),
+      brand: requiredString(fields, "brand"),
       model,
       category: inferCategory(model),
       maskedSerial: maskSerial(requiredString(fields, "masked_serial")),
-      serialHash: optionalString(fields, "serial_hash"),
+      serialHash: requiredAddress(fields, "serial_hash"),
       condition: lifecycleConditionFromCode(
-        String(fields.lifecycle_status ?? 0),
+        fields.lifecycle_status as string | number,
       ),
-      coverageStart: formatDate(
-        String(fields.history_started_at_ms ?? Date.now()),
-      ),
+      coverageStart: formatDate(fields.history_started_at_ms),
       verification: {
         label:
-          Number(fields.verification_level ?? 0) >= 2
-            ? "Contract verified"
-            : "On-chain record",
+          verificationLevel === 2 ? "Contract verified" : "On-chain record",
         explanation:
           "This passport and its service history were read directly from the published ReDevice package on Sui Testnet.",
       },
@@ -544,6 +617,9 @@ export const passportAdapter = {
           return {
             id: `repair-${index + 1}`,
             serviceDate: formatDate(repair.serviced_at_ms),
+            ...(repair.attested_at_ms === undefined
+              ? {}
+              : { attestedAt: formatDate(repair.attested_at_ms) }),
             repairType: repair.repair_type,
             summary: repair.notes,
             repairer: `ReDevice repairer · ${formatAddress(repair.repairer)}`,

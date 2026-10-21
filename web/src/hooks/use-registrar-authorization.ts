@@ -16,5 +16,7 @@ export function useRegistrarAuthorization(walletAddress: string | null) {
     queryFn: () => checkRegistrarAuthorization(client, walletAddress!),
     enabled: Boolean(walletAddress),
     staleTime: 15_000,
+    refetchOnWindowFocus: "always",
+    retry: false,
   });
 }

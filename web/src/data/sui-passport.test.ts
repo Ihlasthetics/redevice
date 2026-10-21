@@ -41,6 +41,15 @@ afterEach(() => {
 });
 
 describe("authorization reads", () => {
+  it("classifies a missing capability object as missing rather than an RPC outage", async () => {
+    const { checkRepairerAuthorization } = await loadAuthorizationModule();
+    const client = mockClient(vi.fn().mockResolvedValue({ object: null }));
+
+    await expect(
+      checkRepairerAuthorization(client, WALLET_ADDRESS),
+    ).rejects.toMatchObject({ code: "missing-or-incompatible" });
+  });
+
   it("diagnoses an explicit registrar/admin ID collision before RPC", async () => {
     const { checkRegistrarAuthorization } = await loadAuthorizationModule({
       registrarCapId: ADMIN_CAP_ID,
@@ -118,6 +127,34 @@ describe("authorization reads", () => {
     await expect(
       checkRepairerAuthorization(client, WALLET_ADDRESS),
     ).rejects.toMatchObject({ code: "invalid-config" });
+  });
+});
+
+describe("passport reads", () => {
+  it("classifies a missing object as missing rather than an RPC outage", async () => {
+    const { loadTestnetPassport } = await loadAuthorizationModule();
+    const client = mockClient(vi.fn().mockResolvedValue({ object: null }));
+
+    await expect(
+      loadTestnetPassport(client, `0x${"5".repeat(64)}`),
+    ).rejects.toMatchObject({ code: "missing-or-incompatible" });
+  });
+
+  it("preserves the typed error from malformed passport fields", async () => {
+    const { loadTestnetPassport } = await loadAuthorizationModule();
+    const client = mockClient(
+      vi.fn().mockResolvedValue({
+        object: {
+          objectId: `0x${"5".repeat(64)}`,
+          type: `${PACKAGE_ID}::redevice::DevicePassport`,
+          json: { model: "Test device" },
+        },
+      }),
+    );
+
+    await expect(
+      loadTestnetPassport(client, `0x${"5".repeat(64)}`),
+    ).rejects.toMatchObject({ code: "missing-or-incompatible" });
   });
 });
 

@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from "lucide-react";
-import { useRef, useState, type FormEvent } from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import {
   TESTNET_PACKAGE_ID,
   TESTNET_REGISTRAR_CAP_ID,
@@ -34,6 +34,7 @@ import PassportQrDownload from "./PassportQrDownload";
 
 type RegistrationStatus =
   | "ready"
+  | "preparing"
   | "awaiting-signature"
   | "confirming"
   | "confirmed"
@@ -52,6 +53,14 @@ type RegisteredDevice = {
   model: string;
   maskedSerial: string;
   registeredAt: Date;
+};
+
+type RegistrationProof = {
+  status: "confirmed" | "confirmed-readback-failed";
+  digest: string;
+  passportId: string | null;
+  device: RegisteredDevice;
+  error: string | null;
 };
 
 function formatAddress(address: string) {
@@ -181,13 +190,41 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
   const [initialCondition, setInitialCondition] = useState("0");
   const [status, setStatus] = useState<RegistrationStatus>("ready");
   const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [digest, setDigest] = useState<string | null>(null);
   const [passportId, setPassportId] = useState<string | null>(null);
   const [registeredDevice, setRegisteredDevice] =
     useState<RegisteredDevice | null>(null);
+  const [reviewed, setReviewed] = useState(false);
+  const [activeSubmission, setActiveSubmission] = useState(false);
   const submissionGuard = useRef(createSubmissionGuard());
+  const lookupGuard = useRef(createSubmissionGuard());
+  const operationVersion = useRef(0);
+  const proofByWallet = useRef(new Map<string, RegistrationProof>());
+  const scopeKey = walletAddress?.toLowerCase() ?? "disconnected";
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
+  const previousProof = proofByWallet.current.get(scopeKey);
 
-  const isBusy = status === "awaiting-signature" || status === "confirming";
+  const isBusy =
+    activeSubmission || status === "preparing" || status === "confirming";
+
+  useLayoutEffect(() => {
+    currentScope.current = scopeKey;
+    operationVersion.current += 1;
+    const proof = proofByWallet.current.get(scopeKey);
+    setStatus(proof?.status ?? "ready");
+    setError(proof?.error ?? null);
+    setLocalError(null);
+    setReviewed(false);
+    setDigest(proof?.digest ?? null);
+    setPassportId(proof?.passportId ?? null);
+    setRegisteredDevice(proof?.device ?? null);
+    return () => {
+      currentScope.current = "unmounted";
+      operationVersion.current += 1;
+    };
+  }, [scopeKey]);
   const showAuthorizationError =
     Boolean(walletAddress) && authorizationQuery.isError;
   const showUnauthorized =
@@ -204,8 +241,18 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
   async function resolveCreatedPassport(
     transactionDigest: string,
     device: RegisteredDevice,
+    submittedScope: string,
+    operationId: number,
+    previousProof?: RegistrationProof,
   ) {
-    setStatus("confirming");
+    const isCurrentOperation = () =>
+      currentScope.current === submittedScope &&
+      operationVersion.current === operationId;
+
+    if (isCurrentOperation()) {
+      setStatus("confirming");
+      setError(null);
+    }
 
     try {
       const finalResult = await client.core.waitForTransaction({
@@ -213,6 +260,23 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
         timeout: 60_000,
         include: { effects: true },
       });
+      if (finalResult.FailedTransaction) {
+        if (previousProof) {
+          proofByWallet.current.set(submittedScope, previousProof);
+        } else {
+          proofByWallet.current.delete(submittedScope);
+        }
+        if (currentScope.current === submittedScope) {
+          setDigest(transactionDigest);
+          setPassportId(null);
+          setStatus("failed");
+          setError(
+            finalResult.FailedTransaction.status.error?.message ??
+              "Sui reported a failed registration transaction.",
+          );
+        }
+        return;
+      }
       const createdPassportId = await findCreatedPassportId(
         client,
         finalResult.Transaction?.effects?.changedObjects ?? [],
@@ -224,31 +288,52 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
         );
       }
 
-      setPassportId(createdPassportId);
-      setRegisteredDevice(device);
-      setStatus("confirmed");
-      setError(null);
-      onPassportCreated(createdPassportId);
+      proofByWallet.current.set(submittedScope, {
+        status: "confirmed",
+        digest: transactionDigest,
+        passportId: createdPassportId,
+        device,
+        error: null,
+      });
+      if (isCurrentOperation()) {
+        setPassportId(createdPassportId);
+        setRegisteredDevice(device);
+        setStatus("confirmed");
+        setError(null);
+        onPassportCreated(createdPassportId);
+      } else if (currentScope.current === submittedScope) {
+        setPassportId(createdPassportId);
+        setRegisteredDevice(device);
+        setStatus("confirmed");
+        setError(null);
+      }
     } catch (readbackError) {
-      setStatus("confirmed-readback-failed");
-      setError(
+      const message =
         readbackError instanceof Error
           ? readbackError.message
-          : "The transaction was confirmed, but its created passport could not be read back.",
-      );
+          : "The transaction was confirmed, but its created passport could not be read back.";
+      proofByWallet.current.set(submittedScope, {
+        status: "confirmed-readback-failed",
+        digest: transactionDigest,
+        passportId: null,
+        device,
+        error: message,
+      });
+      if (isCurrentOperation()) {
+        setStatus("confirmed-readback-failed");
+        setError(message);
+      } else if (currentScope.current === submittedScope) {
+        setStatus("confirmed-readback-failed");
+        setError(message);
+      }
     }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setDigest(null);
-    setPassportId(null);
-    setRegisteredDevice(null);
 
     if (!walletAddress || !isIssuer) {
-      setStatus("failed");
-      setError(
+      setLocalError(
         "Connect an authorized issuer wallet with an active RegistrarCap.",
       );
       return;
@@ -260,14 +345,19 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
     const normalizedSerial = normalizeSerial(serialNumber);
 
     if (!safeDeviceName || !safeBrand || !safeModel) {
-      setStatus("failed");
-      setError("Add a device name, brand, and model.");
+      setLocalError("Add a device name, brand, and model.");
       return;
     }
 
     if (normalizedSerial.length < 6 || normalizedSerial.length > 64) {
-      setStatus("failed");
-      setError("Enter a valid serial number between 6 and 64 characters.");
+      setLocalError("Enter a valid serial number between 6 and 64 characters.");
+      return;
+    }
+
+    if (!reviewed) {
+      setLocalError(
+        "Review the device, normalized serial, and public fields before signing.",
+      );
       return;
     }
 
@@ -275,6 +365,19 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
       return;
     }
 
+    const previousProof = proofByWallet.current.get(scopeKey);
+    setActiveSubmission(true);
+    setStatus("preparing");
+    setError(null);
+    setLocalError(null);
+    setDigest(null);
+    setPassportId(null);
+    setRegisteredDevice(null);
+    const operationId = ++operationVersion.current;
+    const submittedScope = scopeKey;
+    const isCurrentOperation = () =>
+      currentScope.current === submittedScope &&
+      operationVersion.current === operationId;
     let walletRequestStarted = false;
 
     try {
@@ -307,10 +410,26 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
         transaction: simulationTransaction,
       });
 
+      if (!isCurrentOperation()) {
+        return;
+      }
+
       if (simulation.FailedTransaction) {
         throw new Error(
           simulation.FailedTransaction.status.error?.message ??
             "Sui rejected the registration transaction.",
+        );
+      }
+
+      const latestAuthorization = await authorizationQuery.refetch();
+      if (!isCurrentOperation()) {
+        return;
+      }
+      if (latestAuthorization.error || latestAuthorization.data !== true) {
+        throw new Error(
+          latestAuthorization.error instanceof Error
+            ? latestAuthorization.error.message
+            : "Registrar permission is no longer confirmed. Retry authorization before signing.",
         );
       }
 
@@ -320,17 +439,18 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
       const result = await dAppKit.signAndExecuteTransaction({ transaction });
 
       if (result.FailedTransaction) {
-        setDigest(result.FailedTransaction.digest);
-        setStatus("failed");
-        setError(
-          result.FailedTransaction.status.error?.message ??
-            "Sui reported a failed registration transaction.",
-        );
+        if (isCurrentOperation()) {
+          setDigest(result.FailedTransaction.digest);
+          setStatus("failed");
+          setError(
+            result.FailedTransaction.status.error?.message ??
+              "Sui reported a failed registration transaction.",
+          );
+        }
         return;
       }
 
       const transactionDigest = result.Transaction.digest;
-      setDigest(transactionDigest);
       const device = {
         deviceName: safeDeviceName,
         brand: safeBrand,
@@ -338,19 +458,48 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
         maskedSerial: safeMaskedSerial,
         registeredAt,
       };
-      setRegisteredDevice(device);
-      await resolveCreatedPassport(transactionDigest, device);
+      proofByWallet.current.set(submittedScope, {
+        status: "confirmed-readback-failed",
+        digest: transactionDigest,
+        passportId: null,
+        device,
+        error:
+          "The transaction was confirmed. Retry passport lookup if the device ID is not shown.",
+      });
+      if (isCurrentOperation()) {
+        setDigest(transactionDigest);
+        setRegisteredDevice(device);
+        setReviewed(false);
+        await resolveCreatedPassport(
+          transactionDigest,
+          device,
+          submittedScope,
+          operationId,
+          previousProof,
+        );
+      } else if (currentScope.current === submittedScope) {
+        setDigest(transactionDigest);
+        setRegisteredDevice(device);
+        setStatus("confirmed-readback-failed");
+        setError(
+          "The transaction was confirmed after the wallet changed. Retry passport lookup to verify its device ID.",
+        );
+      }
     } catch (transactionError) {
-      setStatus(
-        isWalletCancellation(transactionError)
-          ? "cancelled"
-          : walletRequestStarted
-            ? "unknown"
-            : "failed",
-      );
-      setError(errorMessage(transactionError, walletRequestStarted));
+      if (isCurrentOperation()) {
+        if (walletRequestStarted) {
+          setStatus(
+            isWalletCancellation(transactionError) ? "cancelled" : "unknown",
+          );
+          setError(errorMessage(transactionError, true));
+        } else {
+          setStatus("ready");
+          setLocalError(errorMessage(transactionError, false));
+        }
+      }
     } finally {
       submissionGuard.current.finish();
+      setActiveSubmission(false);
     }
   }
 
@@ -463,6 +612,13 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   : "Sui Testnet could not confirm this wallet's permission."}{" "}
                 Signing remains disabled; this is not a permission denial.
               </p>
+              <button
+                className="mt-4 min-h-11 text-sm font-semibold text-brand"
+                type="button"
+                onClick={() => void authorizationQuery.refetch()}
+              >
+                Retry authorization check
+              </button>
             </div>
           )}
 
@@ -513,13 +669,19 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-5 sm:grid-cols-2">
+              <fieldset
+                disabled={isBusy}
+                className="mt-6 grid gap-5 sm:grid-cols-2"
+              >
                 <label className="block text-sm font-semibold">
                   Device name
                   <input
                     className="mt-2 min-h-12 w-full rounded-xl border border-line bg-canvas px-3.5 text-sm font-medium text-ink"
                     value={deviceName}
-                    onChange={(event) => setDeviceName(event.target.value)}
+                    onChange={(event) => {
+                      setDeviceName(event.target.value);
+                      setReviewed(false);
+                    }}
                     maxLength={80}
                     placeholder="My MacBook"
                     required
@@ -531,7 +693,10 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   <input
                     className="mt-2 min-h-12 w-full rounded-xl border border-line bg-canvas px-3.5 text-sm font-medium text-ink"
                     value={brand}
-                    onChange={(event) => setBrand(event.target.value)}
+                    onChange={(event) => {
+                      setBrand(event.target.value);
+                      setReviewed(false);
+                    }}
                     maxLength={80}
                     placeholder="Apple"
                     required
@@ -543,7 +708,10 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   <input
                     className="mt-2 min-h-12 w-full rounded-xl border border-line bg-canvas px-3.5 text-sm font-medium text-ink"
                     value={model}
-                    onChange={(event) => setModel(event.target.value)}
+                    onChange={(event) => {
+                      setModel(event.target.value);
+                      setReviewed(false);
+                    }}
                     maxLength={80}
                     required
                   />
@@ -559,7 +727,10 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                     <input
                       className="min-h-12 w-full rounded-xl border border-line bg-canvas py-2 pl-10 pr-3.5 font-mono text-sm font-medium text-ink"
                       value={serialNumber}
-                      onChange={(event) => setSerialNumber(event.target.value)}
+                      onChange={(event) => {
+                        setSerialNumber(event.target.value);
+                        setReviewed(false);
+                      }}
                       maxLength={64}
                       autoCapitalize="characters"
                       autoComplete="off"
@@ -569,9 +740,16 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                     />
                   </span>
                   <span className="mt-1.5 block text-xs font-normal leading-5 text-muted">
-                    Hashed in your browser. Only a masked serial and its SHA-256
-                    hash are published.
+                    Uppercase letters and digits are kept; spaces and
+                    punctuation are removed before hashing. Only a masked serial
+                    and its SHA-256 hash are published.
                   </span>
+                  {serialNumber && (
+                    <span className="mt-1 block break-all font-mono text-xs font-normal text-muted">
+                      Normalized serial:{" "}
+                      {normalizeSerial(serialNumber) || "(empty)"}
+                    </span>
+                  )}
                 </label>
 
                 <label className="block text-sm font-semibold">
@@ -579,9 +757,10 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                   <select
                     className="mt-2 min-h-12 w-full rounded-xl border border-line bg-canvas px-3.5 text-sm font-medium text-ink"
                     value={initialCondition}
-                    onChange={(event) =>
-                      setInitialCondition(event.target.value)
-                    }
+                    onChange={(event) => {
+                      setInitialCondition(event.target.value);
+                      setReviewed(false);
+                    }}
                   >
                     <option value="0">Used</option>
                     <option value="1">Repaired</option>
@@ -589,7 +768,25 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                     <option value="3">Parts only</option>
                   </select>
                 </label>
-              </div>
+              </fieldset>
+
+              <label className="mt-5 flex items-start gap-3 text-xs leading-5 text-muted">
+                <input
+                  className="mt-1"
+                  type="checkbox"
+                  checked={reviewed}
+                  disabled={isBusy}
+                  onChange={(event) => setReviewed(event.target.checked)}
+                />
+                I reviewed the target device, normalized serial, and all public
+                registration fields.
+              </label>
+
+              {status === "preparing" && (
+                <p className="mt-5 text-sm text-muted" role="status">
+                  Preparing and simulating the registration transaction…
+                </p>
+              )}
 
               <div className="mt-6 flex items-start gap-3 rounded-xl bg-amber-50 p-3.5 text-amber-950">
                 <Info
@@ -613,6 +810,23 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                     device={registeredDevice}
                   />
                 )}
+
+              {previousProof && previousProof.digest !== digest && (
+                <a
+                  className="mt-3 inline-flex min-h-11 items-center text-xs font-semibold text-brand"
+                  href={transactionExplorerUrl(previousProof.digest)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View earlier confirmed registration transaction
+                </a>
+              )}
+
+              {localError && (
+                <p className="mt-5 text-sm text-red-800" role="alert">
+                  {localError}
+                </p>
+              )}
 
               {status !== "confirmed" && error && (
                 <div
@@ -643,9 +857,18 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                       <button
                         className="ml-4 min-h-11 font-semibold text-brand"
                         type="button"
-                        onClick={() =>
-                          void resolveCreatedPassport(digest, registeredDevice)
-                        }
+                        onClick={() => {
+                          if (!lookupGuard.current.tryStart()) {
+                            return;
+                          }
+                          const operationId = ++operationVersion.current;
+                          void resolveCreatedPassport(
+                            digest,
+                            registeredDevice,
+                            scopeKey,
+                            operationId,
+                          ).finally(() => lookupGuard.current.finish());
+                        }}
                       >
                         Retry passport lookup
                       </button>
@@ -666,15 +889,17 @@ function DeviceRegistration({ onPassportCreated }: DeviceRegistrationProps) {
                     className={`size-4 ${isBusy ? "animate-spin" : ""}`}
                   />
                 )}
-                {status === "awaiting-signature"
-                  ? "Approve in wallet"
-                  : status === "confirming"
-                    ? "Confirming on Sui"
-                    : status === "confirmed"
-                      ? "Register another device"
-                      : status === "confirmed-readback-failed"
-                        ? "Transaction confirmed — retry lookup"
-                        : "Sign and register device"}
+                {status === "preparing"
+                  ? "Preparing registration"
+                  : status === "awaiting-signature"
+                    ? "Approve in wallet"
+                    : status === "confirming"
+                      ? "Confirming on Sui"
+                      : status === "confirmed"
+                        ? "Register another device"
+                        : status === "confirmed-readback-failed"
+                          ? "Transaction confirmed — retry lookup"
+                          : "Sign and register device"}
               </button>
             </form>
           )}

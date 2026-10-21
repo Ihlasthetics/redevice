@@ -16,5 +16,7 @@ export function useRepairerAuthorization(walletAddress: string | null) {
     queryFn: () => checkRepairerAuthorization(client, walletAddress!),
     enabled: Boolean(walletAddress),
     staleTime: 15_000,
+    refetchOnWindowFocus: "always",
+    retry: false,
   });
 }

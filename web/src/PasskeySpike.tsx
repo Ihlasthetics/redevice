@@ -37,8 +37,15 @@ type AttestMethods = {
   ) => Promise<contract.AssembledTransaction<contract.Result<number>>>;
 };
 
-const message = (error: unknown) =>
-  error instanceof Error ? error.message : "Passkey action failed.";
+const message = (error: unknown) => {
+  if (!(error instanceof Error)) return "Passkey action failed.";
+  if (
+    error.name === "NotAllowedError" ||
+    /operation either timed out or was not allowed/i.test(error.message)
+  )
+    return `The browser could not complete the passkey prompt on ${window.location.hostname}. Reconnect using the passkey created for this website, then try again. If the prompt was canceled or timed out, approve it when it appears.`;
+  return error.message;
+};
 
 export default function PasskeySpike() {
   const [account, setAccount] = useState("");
@@ -99,7 +106,7 @@ export default function PasskeySpike() {
   }
 
   async function connectAccount() {
-    await kit.connectWallet({ prompt: true });
+    await kit.connectWallet({ fresh: true });
     if (!kit.contractId) throw new Error("No passkey account was found.");
     setAccount(kit.contractId);
     setNotice(`Connected ${kit.contractId}`);
@@ -150,7 +157,7 @@ export default function PasskeySpike() {
       });
       if (tx.isReadCall) throw new Error("Expected a write transaction.");
       const result = await kit.signAndSubmit(tx as never);
-      if (!result.success) throw new Error(result.error.message);
+      if (!result.success) throw new Error(message(result.error));
       setHash(result.hash);
       const refreshed = await getDevice(deviceId);
       const repairs = refreshed
@@ -201,8 +208,8 @@ export default function PasskeySpike() {
             <section className="rd-panel p-6">
               <h2 className="rd-panel-heading">1. Connect your passkey</h2>
               <p className="mt-2 text-sm text-muted">
-                The same browser and website address are needed to reconnect an
-                existing account.
+                The passkey must be available in this browser for this website.
+                Reconnect asks the browser to select and verify it again.
               </p>
               {!testUnlocked && (
                 <form

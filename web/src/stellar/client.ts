@@ -9,6 +9,7 @@ import {
 import { Networks, StrKey, contract, rpc } from "@stellar/stellar-sdk";
 import {
   createSerialCommitment,
+  maskSerial,
   normalizeSerialIdentity,
   parseStellarDeviceId,
 } from "./identity";
@@ -157,8 +158,8 @@ export async function getRepairs(id: string, count: number) {
 }
 
 export async function hasRole(role: "Registrar" | "Repairer", account: string) {
-  if (!StrKey.isValidEd25519PublicKey(account))
-    throw new Error("Invalid wallet address.");
+  if (!isValidRepairerAddress(account))
+    throw new Error("Invalid G... or C... account address.");
   return read<boolean>("has_role", { role: { tag: role }, account });
 }
 
@@ -313,8 +314,8 @@ export async function changeRepairerRole(
   account: string,
   grant: boolean,
 ) {
-  if (!StrKey.isValidEd25519PublicKey(account))
-    throw new Error("Enter a valid repairer wallet address.");
+  if (!isValidRepairerAddress(account))
+    throw new Error("Enter a valid G... or C... repairer address.");
   if ((await getAdministrator()) !== admin)
     throw new Error(
       "The connected wallet is not this contract's administrator.",
@@ -331,6 +332,12 @@ export async function changeRepairerRole(
     role: { tag: "Repairer" },
     account,
   });
+}
+
+export function isValidRepairerAddress(account: string) {
+  return (
+    StrKey.isValidEd25519PublicKey(account) || StrKey.isValidContract(account)
+  );
 }
 
 function requestId(key: string) {
@@ -355,7 +362,6 @@ export async function registerDevice(
     serial: string;
     brand: string;
     model: string;
-    maskedSerial: string;
     status: "Used" | "Refurbished";
   },
 ) {
@@ -365,7 +371,8 @@ export async function registerDevice(
     serial: fields.serial,
   });
   const commitment = await createSerialCommitment(identity);
-  const key = `redevice:stellar:register:${CONTRACT_ID}:${account}:${JSON.stringify({ commitment, brand: fields.brand.trim(), model: fields.model.trim(), maskedSerial: fields.maskedSerial.trim(), status: fields.status })}`;
+  const maskedSerial = maskSerial(identity.serial);
+  const key = `redevice:stellar:register:${CONTRACT_ID}:${account}:${JSON.stringify({ commitment, brand: fields.brand.trim(), model: fields.model.trim(), maskedSerial, status: fields.status })}`;
   const result = await write<bigint>(account, "register_device", {
     registrar: account,
     request_id: requestId(key),
@@ -376,7 +383,7 @@ export async function registerDevice(
     product_namespace: identity.productNamespace,
     brand: fields.brand.trim(),
     model: fields.model.trim(),
-    masked_serial: fields.maskedSerial.trim(),
+    masked_serial: maskedSerial,
     status: { tag: fields.status },
   });
   localStorage.removeItem(key);

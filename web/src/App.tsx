@@ -213,7 +213,6 @@ function App({ view = "auto" }: { view?: View }) {
   const [serial, setSerial] = useState("");
   const [manufacturer, setManufacturer] = useState("");
   const [product, setProduct] = useState("");
-  const [maskedSerial, setMaskedSerial] = useState("");
   const [initialStatus, setInitialStatus] = useState<"Used" | "Refurbished">(
     "Used",
   );
@@ -335,17 +334,14 @@ function App({ view = "auto" }: { view?: View }) {
     setError("");
     setNotice("Simulating registration; approve in Freighter when prompted.");
     try {
-      if (!brand.trim() || !model.trim() || maskedSerial.trim().length < 4)
-        throw new Error(
-          "Brand, model, and a masked serial of at least 4 characters are required.",
-        );
+      if (!brand.trim() || !model.trim())
+        throw new Error("Brand and model are required.");
       const result = await registerDevice(wallet, {
         manufacturer,
         product,
         serial,
         brand,
         model,
-        maskedSerial,
         status: initialStatus,
       });
       const newId = result.result.toString();
@@ -630,8 +626,9 @@ function App({ view = "auto" }: { view?: View }) {
             <h2 className="text-xl font-semibold">Register a device</h2>
             <p className="text-sm text-muted">
               Connect a Testnet wallet to register. The full serial stays in
-              this browser; only its hash is sent on-chain. Registration is a
-              wallet-signed claim, not independent proof of ownership.
+              this browser; its hash and an automatically masked serial are sent
+              on-chain. Registration is a wallet-signed claim, not independent
+              proof of ownership.
             </p>
             {!wallet && (
               <p className="text-sm text-amber-800">
@@ -661,14 +658,6 @@ function App({ view = "auto" }: { view?: View }) {
               placeholder="Full serial (never published)"
               value={serial}
               onChange={(event) => setSerial(event.target.value)}
-            />
-            <input
-              required
-              maxLength={32}
-              className="rounded-xl border border-line p-3"
-              placeholder="Masked serial, e.g. ABC***123"
-              value={maskedSerial}
-              onChange={(event) => setMaskedSerial(event.target.value)}
             />
             <input
               required

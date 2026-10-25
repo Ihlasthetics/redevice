@@ -15,7 +15,7 @@ HackMeridian work starts from `main` at `9e41f617aeaad999efca967da472d166e03b97f
 
 The device identity is `(Stellar network passphrase, contract address, contract-local u64 device ID)`. The human URL uses `stellar-testnet`, and the client validates it against the Testnet passphrase and a valid `C...` contract address. The device ID is a decimal integer, not a Sui object ID.
 
-The versioned serial-commitment preimage and test vectors are below. The browser computes the commitment; the contract only sees the 32-byte hash and cannot prove that the registrar used the claimed raw serial. The commitment is public and guessable, not anonymous. Display names are separate from normalized namespaces. Contract timestamps use Unix **seconds**; `claimed_service_time` and ledger `attested_at` are distinct fields.
+The versioned serial-commitment preimage and test vectors are below. The browser computes the commitment and a public serial mask automatically; the contract sees the 32-byte hash and mask, but cannot prove that the registrar used the claimed raw serial. The commitment is public and guessable, not anonymous. Display names are separate from normalized namespaces. Contract timestamps use Unix **seconds**; `claimed_service_time` and ledger `attested_at` are distinct fields.
 
 **Gate met:** schema, normalization, vectors, invalid-input tests, and route rules are documented. No Sui object ID is accepted as a Stellar identity.
 
@@ -69,6 +69,6 @@ Simulate, assemble, sign, submit, and poll to final `SUCCESS` or `FAILED`; `PEND
 - Run `cargo fmt --manifest-path stellar/Cargo.toml --check`, `cargo test --manifest-path stellar/Cargo.toml --locked`, and `stellar contract build --manifest-path stellar/Cargo.toml --package redevice-stellar --locked` before deployment. The contract CI job pins Rust 1.99.1 and Stellar CLI 28.1.0 and runs on `stellar/**` changes.
 - Run `npm ci`, `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --audit-level=high` at the repo root after frontend changes.
 - Test open registration on the new contract with Yhlas's funded account, then check an incognito/phone HTTPS QR read. Mocked tests and CLI reads do not prove wallet or camera behavior.
-- Defer evidence uploads, payments, passkeys, historical Sui import, generic multichain abstractions, and production indexing until the core slice passes.
+- Defer evidence uploads, payments, historical Sui import, generic multichain abstractions, and production indexing until the core slice passes. Passkey-sponsored actions are planned separately in [the passkey roadmap](passkey_sponsored_actions.md); they are not yet implemented.
 
 Current Stellar tooling behavior must be checked against [Stellar contract documentation](https://developers.stellar.org/docs/build/smart-contracts), [Stellar CLI documentation](https://developers.stellar.org/docs/tools/cli), and [state archival documentation](https://developers.stellar.org/docs/build/guides/archival) before each implementation step.

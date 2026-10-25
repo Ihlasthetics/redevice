@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Networks, StrKey, contract, rpc } from "@stellar/stellar-sdk";
 import {
   connectWallet,
+  isValidRepairerAddress,
   getConnectedWallet,
   deviceExplorerUrl,
   parsePassportPath,
@@ -35,6 +36,30 @@ beforeEach(() => {
 });
 
 describe("Stellar public identity", () => {
+  it("accepts both classic and smart-account repairer addresses", () => {
+    expect(isValidRepairerAddress(account)).toBe(true);
+    expect(isValidRepairerAddress(contractId)).toBe(true);
+    expect(isValidRepairerAddress("CINVALID")).toBe(false);
+    expect(isValidRepairerAddress("GINVALID")).toBe(false);
+  });
+
+  it("checks a smart-account Repairer role on chain", async () => {
+    vi.stubEnv("VITE_STELLAR_CONTRACT_ID", contractId);
+    vi.resetModules();
+    const { hasRole } = await import("./client");
+    const query = vi
+      .spyOn(rpc.Server.prototype, "queryContract")
+      .mockResolvedValue({ result: true, isReadCall: true });
+    await expect(hasRole("Repairer", contractId)).resolves.toBe(true);
+    expect(query).toHaveBeenCalledWith(
+      contractId,
+      "has_role",
+      { role: { tag: "Repairer" }, account: contractId },
+      Networks.TESTNET,
+    );
+    query.mockRestore();
+    vi.unstubAllEnvs();
+  });
   it("requires the exact five digit ID in the new contract mode", async () => {
     vi.stubEnv("VITE_FIVE_DIGIT_IDS", "true");
     vi.resetModules();

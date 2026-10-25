@@ -2,6 +2,7 @@ import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSerialCommitment,
+  maskSerial,
   normalizeSerialIdentity,
   parseStellarDeviceId,
 } from "./identity";
@@ -76,6 +77,19 @@ describe("Stellar serial commitment v1", () => {
     { manufacturerNamespace: "brand", productNamespace: "model", serial: "" },
   ])("rejects ambiguous or unsupported inputs: %j", (identity) => {
     expect(() => normalizeSerialIdentity(identity)).toThrow();
+  });
+});
+
+describe("public serial mask", () => {
+  it("reveals only the last three normalized characters of a long serial", () => {
+    expect(maskSerial(" pf-123/ab9 ")).toBe("***AB9");
+    expect(maskSerial("ABC123")).toBe("***123");
+  });
+
+  it("fully hides short serials and rejects invalid ones", () => {
+    expect(maskSerial("ABC12")).toBe("****");
+    expect(maskSerial("A")).toBe("****");
+    expect(() => maskSerial("ABC 123")).toThrow();
   });
 });
 

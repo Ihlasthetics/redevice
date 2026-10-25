@@ -18,5 +18,8 @@
   "engines": {
     "node": ">=22.12.0"
   },
-  "packageManager": "npm@11.6.2"
+  "packageManager": "npm@11.6.2",
+  "dependencies": {
+    "@openzeppelin/relayer-plugin-channels": "0.21.0"
+  }
 }

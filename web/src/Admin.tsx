@@ -241,7 +241,8 @@ export default function Admin() {
                 <div>
                   <h2 className="text-2xl font-semibold">Manage an account</h2>
                   <p className="mt-1 text-sm text-muted">
-                    Enter the repairer's public Testnet wallet address.
+                    Enter the repairer's public Testnet address (G… wallet or C…
+                    passkey account).
                   </p>
                 </div>
                 {checked && hasRepairerRole !== null && (
@@ -262,7 +263,7 @@ export default function Admin() {
                 <input
                   id="admin-account"
                   className="min-w-0 flex-1 rounded-xl border border-line p-3 font-mono text-sm"
-                  placeholder="G… wallet address"
+                  placeholder="G… or C… address"
                   value={account}
                   onChange={(event) => {
                     setAccount(event.target.value);

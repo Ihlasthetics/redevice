@@ -49,6 +49,11 @@ export function normalizeSerialIdentity(
   };
 }
 
+export function maskSerial(serial: string): string {
+  const normalized = normalizeSerial(serial);
+  return normalized.length >= 6 ? `***${normalized.slice(-3)}` : "****";
+}
+
 export async function createSerialCommitment(
   identity: SerialIdentity,
 ): Promise<string> {

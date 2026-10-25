@@ -19,7 +19,7 @@ The personal Vercel project `yhlas/redevice` is deployed from this checkout. It 
 ## What works
 
 - Freighter connects on Testnet and checks the connected account's on-chain roles.
-- Any connected Testnet wallet can register a device. The browser hashes the normalized full serial; the contract stores its commitment and rejects duplicates. The full serial is not submitted. A serial commitment can still be guessed from likely serials, so it is not anonymous. Registration is a wallet-signed claim, not proof of ownership.
+- Any connected Testnet wallet can register a device. The browser hashes the normalized full serial and automatically publishes a mask (the last three characters for serials of at least six characters; shorter serials are fully hidden). The contract stores the commitment and mask and rejects duplicates. The full serial is not submitted. A serial commitment can still be guessed from likely serials, so it is not anonymous. Registration is a wallet-signed claim, not proof of ownership.
 - A repairer can append a repair with public notes, a lifecycle change, optional battery health, and an optional claimed service time. The contract records its own ledger timestamp separately.
 - Anyone can read a passport and paged repair history without a wallet. The app provides passport URLs, QR codes, camera scanning, PDF export, and explorer links.
 - Registration and repair requests have stable request IDs, and the browser waits for final transaction status. The contract has role revocation, input limits, lifecycle rules, and storage TTL extension.
@@ -78,7 +78,7 @@ npm run test:fee-bump
 npm run build
 ```
 
-The latest local checks passed: **35 browser tests** and **13 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
+The latest local checks passed: **39 browser tests** and **13 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
 
 ```sh
 cargo fmt --manifest-path stellar/Cargo.toml --check
@@ -96,3 +96,5 @@ Vercel builds from the repository root with [vercel.json](vercel.json). The pers
 - Record registration and repair transaction hashes in the deployment record. Vercel is not yet linked to GitHub.
 
 See [the Stellar integration plan](docs/stellar_integration.md) for the schema, test gates, and remaining migration details. The earlier Sui prototype remains in Git history; its records are not presented as Stellar records.
+
+The passkey feasibility harness is documented in the [passkey-sponsored actions roadmap](docs/passkey_sponsored_actions.md), with [Vercel Preview setup](docs/passkey_vercel_preview.md). Its real Testnet passkey transaction and reusable layer still require proof.

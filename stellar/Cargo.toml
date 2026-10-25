@@ -1,0 +1,9 @@
+[workspace]
+members = ["contracts/redevice"]
+resolver = "2"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+lto = true
+codegen-units = 1

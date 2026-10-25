@@ -1,0 +1,102 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Networks, StrKey, contract, rpc } from "@stellar/stellar-sdk";
+import {
+  connectWallet,
+  deviceExplorerUrl,
+  parsePassportPath,
+  passportPath,
+  publicPassportUrl,
+  requireContractId,
+  transactionExplorerUrl,
+} from "./client";
+
+const wallet = vi.hoisted(() => ({
+  requestAccess: vi.fn(),
+  getNetwork: vi.fn(),
+  signTransaction: vi.fn(),
+}));
+vi.mock("@stellar/freighter-api", () => wallet);
+
+const contractId = StrKey.encodeContract(new Uint8Array(32).fill(7));
+const account = StrKey.encodeEd25519PublicKey(new Uint8Array(32).fill(8));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  wallet.requestAccess.mockResolvedValue({ address: account });
+  wallet.getNetwork.mockResolvedValue({
+    network: "TESTNET",
+    networkPassphrase: Networks.TESTNET,
+  });
+});
+
+describe("Stellar public identity", () => {
+  it("accepts a checksummed contract and canonical decimal device ID", () => {
+    expect(requireContractId(contractId)).toBe(contractId);
+    const path = passportPath("42", contractId);
+    expect(parsePassportPath(path)).toEqual({ contractId, id: "42" });
+    expect(deviceExplorerUrl("42", contractId)).toContain(
+      `/contract/${contractId}`,
+    );
+  });
+
+  it("rejects malformed paths, IDs, and public origins", () => {
+    expect(parsePassportPath(`/passport/mainnet/${contractId}/1`)).toBeNull();
+    expect(() =>
+      parsePassportPath(`/passport/stellar-testnet/${contractId}/01`),
+    ).toThrow();
+    expect(() =>
+      parsePassportPath(`/passport/stellar-testnet/CINVALID/1`),
+    ).toThrow();
+    expect(() => passportPath("0x123", contractId)).toThrow();
+    expect(() => publicPassportUrl("1", "http://example.com")).toThrow();
+    expect(() => publicPassportUrl("1", "https://example.com/path")).toThrow();
+    expect(() => transactionExplorerUrl("invalid")).toThrow();
+  });
+
+  it("unwraps a paged Soroban Result for a public repair read", async () => {
+    vi.stubEnv("VITE_STELLAR_CONTRACT_ID", contractId);
+    vi.resetModules();
+    const { getRepairs } = await import("./client");
+    const query = vi
+      .spyOn(rpc.Server.prototype, "queryContract")
+      .mockResolvedValue({
+        result: new contract.Ok([{ index: 0 }]),
+        isReadCall: true,
+      });
+    await expect(getRepairs("1", 1)).resolves.toEqual([{ index: 0 }]);
+    expect(query).toHaveBeenCalledWith(
+      expect.any(String),
+      "get_repairs",
+      { device_id: 1n, start: 0, limit: 1 },
+      Networks.TESTNET,
+    );
+    query.mockRestore();
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("Freighter connection", () => {
+  it("rejects the wrong network", async () => {
+    wallet.getNetwork.mockResolvedValue({
+      network: "PUBLIC",
+      networkPassphrase: Networks.PUBLIC,
+    });
+    await expect(connectWallet()).rejects.toThrow(
+      "Switch Freighter to Stellar Testnet",
+    );
+  });
+
+  it("rejects a cancelled or malformed account response", async () => {
+    wallet.requestAccess.mockResolvedValue({
+      address: "",
+      error: { message: "User rejected", code: -4 },
+    });
+    await expect(connectWallet()).rejects.toThrow("User rejected");
+    wallet.requestAccess.mockResolvedValue({ address: "GINVALID" });
+    await expect(connectWallet()).rejects.toThrow("valid account");
+  });
+
+  it("accepts an authorized Testnet connection", async () => {
+    await expect(connectWallet()).resolves.toBe(account);
+  });
+});

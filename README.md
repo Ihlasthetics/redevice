@@ -1,196 +1,94 @@
 # ReDevice
 
-**Verifiable device passports and repair histories for second-hand electronics, built on Sui.**
+ReDevice gives refurbished electronics a public passport and repair history on Stellar Testnet. Authorized registrars create device records, authorized repairers append service attestations, and anyone can read a passport through a link or QR code without connecting a wallet. An on-chain attestation proves which account submitted a record and when; it does not independently prove that physical work occurred.
 
-ReDevice is an ETHGlobal Lisbon 2026 prototype that gives each registered device a public, QR-accessible passport. Buyers can inspect a device's identity, current condition, verified coverage date, and repair history without creating an account or connecting a wallet.
+## Current status — 25 October 2026
 
-Authorized registrars create passports, and authorized repairers append service attestations. ReDevice makes those records transparent and tamper-evident while clearly distinguishing verified on-chain history from earlier or unverified physical-world claims.
+| Item                  | Status                                                             |
+| --------------------- | ------------------------------------------------------------------ |
+| Public app            | [redevice-delta.vercel.app](https://redevice-delta.vercel.app)     |
+| Network               | Stellar Testnet                                                    |
+| Contract              | `CDSP64KAEVFZ5QU3U2AMTNFWWF3CHEXRCFBSXWDESF6QSR3SHU2CWZCT`         |
+| Reviewed WASM SHA-256 | `77bb782f87eee60ad687fa78cf31c4b2e221e4a12469ce657438a1d3ef2d22d0` |
+| Administrator         | `GD4EBGIWGRWV53KWC5UVLCKDIXTGLFDJKRBEATB7B3SUXJWNWT2KYLJT`         |
 
-> ReDevice verifies who signed a record, when it was added, and that it was not silently changed. It does not prove that a physical repair occurred.
+The contract and both roles are live. Akif registered a device and attested a repair through the local browser. Public Testnet reads confirm device **1** and its **one repair record**. The hosted homepage and direct passport route respond over HTTPS. Yhlas's independent wallet and phone QR flow still need testing.
 
-## Why ReDevice?
+The current Vercel deployment came from the local `hackathon/stellar-migration-akif` checkout. It is not connected to the GitHub repository, and these migration changes have not been pushed. Later code changes require another deployment to update the hosted app.
 
-Second-hand electronics often come with incomplete, editable, or fragmented service records. ReDevice provides:
+## What works
 
-- public passport access through a QR code, pasted QR content, or passport link
-- device identity, masked serial number, current lifecycle status, and verified-history start date
-- capability-gated device registration and repair workflows
-- append-only repair attestations stored in a shared Sui object
-- duplicate registration protection using a locally hashed serial number
-- downloadable QR passport PDFs
-- independent object and transaction inspection through SuiVision
+- Freighter connects on Testnet and checks the connected account's on-chain roles.
+- A registrar can register a device. The browser hashes the normalized full serial; the contract stores its commitment and rejects duplicates. The full serial is not submitted. A serial commitment can still be guessed from likely serials, so it is not anonymous.
+- A repairer can append a repair with public notes, a lifecycle change, optional battery health, and an optional claimed service time. The contract records its own ledger timestamp separately.
+- Anyone can read a passport and paged repair history without a wallet. The app provides passport URLs, QR codes, camera scanning, PDF export, and explorer links.
+- Registration and repair requests have stable request IDs, and the browser waits for final transaction status. The contract has role revocation, input limits, lifecycle rules, and storage TTL extension.
 
-Static demo data is available when the configured Testnet deployment cannot be
-read. It is always labeled **“Demo data — not a live blockchain record”** and
-cannot initiate transactions.
+### Roles today
 
-## How it works
+| Role          | On-chain permission                                    |
+| ------------- | ------------------------------------------------------ |
+| Administrator | Grant, revoke, and replace Registrar or Repairer roles |
+| Registrar     | Register devices                                       |
+| Repairer      | Attest repairs on registered devices                   |
+| No role       | Read public records                                    |
 
-1. An authorized registrar connects a Sui wallet and creates a device passport.
-2. The full serial number is hashed locally; only the hash and a masked serial are submitted.
-3. The shared `DeviceRegistry` rejects a second passport for the same serial hash.
-4. A buyer scans the device QR code or opens its passport link without connecting a wallet.
-5. An authorized repairer signs a repair attestation.
-6. The Move contract validates the repairer's active `RepairerCap`, appends the record, and updates the device lifecycle status.
-7. The frontend reloads the shared `DevicePassport` from Sui Testnet.
+The contract requires the actor's signature **and** active role for every write; disabling a browser button is only a user interface aid. Akif's account is currently Administrator, Registrar, and Repairer because it was used for the first end-to-end test. The roles can be assigned to separate accounts without changing the contract. The `/deploy` page can grant roles to its connected administrator account, but a general admin screen for other addresses and revocation is still needed. Any authorized repairer can currently attest a repair on any registered device; there is no per-device assignment.
 
-## Authorization model
+## Test the hosted app
 
-ReDevice uses Sui Move capabilities rather than treating any connected wallet as trusted:
+1. Open [the app](https://redevice-delta.vercel.app) and read device ID `1` without connecting a wallet.
+2. To test a write, install Freighter, select **Test Net**, connect an account that has the relevant role, and approve the transaction in Freighter. Only Akif's account currently has both write roles.
+3. Open a passport link or QR code on a second device to check the public experience. Hosted links use the HTTPS Vercel origin; a localhost QR link is not reachable from another device.
 
-| Capability     | Purpose                                                  |
-| -------------- | -------------------------------------------------------- |
-| `AdminCap`     | Grants or revokes registrar and repairer capabilities    |
-| `RegistrarCap` | Allows its assigned wallet to create device passports    |
-| `RepairerCap`  | Allows its assigned wallet to append repair attestations |
-
-Capabilities can be revoked without removing their audit trail. Unauthorized wallets, revoked repairers, invalid lifecycle states, invalid battery-health values, and duplicate serial hashes are rejected on-chain.
-
-## Current prototype
-
-The prototype code currently supports:
-
-- compatible passport reads and capability-gated transactions on **Sui Testnet**
-- wallet-based registrar and repairer workflows
-- camera QR scanning, pasted QR content, and passport URLs (not QR-image upload)
-- public, wallet-free passport viewing
-- repair history with service type, notes, condition change, battery health, timestamps, repairer address, and evidence reference
-- QR passport PDF generation
-- SuiVision links for objects and transactions
-- automatic passport refresh after confirmed repair transactions
-
-Evidence upload is not implemented. New repairs submit an explicit empty
-evidence value; historical demo references remain visible only as unavailable
-placeholders. ReDevice does **not** claim a production Walrus upload or official
-EU registry integration.
-
-## Testnet deployment
-
-| Resource        | ID                                                                   |
-| --------------- | -------------------------------------------------------------------- |
-| Package         | `0xd960ddb62abcbf29d916639debf1ddb9e2e110140b7f4e897f1922f64c5dcf60` |
-| Device registry | `0x63db08a5932edad48c36bdfe33b7a447276ccfd8b4fb55ef6157b596f10eeb5a` |
-| Demo passport   | `0xc1e9a7e28afc26bccf67cae9ea29807d7961bc3d1f922f9aa8f7156c03c46666` |
-
-These values are prototype defaults and can be overridden through Vite environment variables.
-
-The checked-in defaults are not a mutually compatible live deployment: the demo
-passport belongs to a different package, and the default registrar capability
-ID is the AdminCap ID. The frontend now reports those configuration problems
-instead of labeling fixture data or failed authorization reads as live. Use
-known-compatible Testnet IDs in `web/.env.local` to exercise write flows; do not
-guess or copy private wallet material into the repository.
-
-## Tech stack
-
-- **Smart contracts:** Sui Move
-- **Frontend:** React 19, TypeScript, Vite, and Tailwind CSS
-- **Sui integration:** Mysten dApp Kit and `@mysten/sui`
-- **Data fetching:** TanStack Query
-- **QR and PDF:** `jsQR`, `qrcode`, and `jsPDF`
-- **Explorer:** SuiVision Testnet
-
-## Project structure
-
-```text
-redevice/
-├── move/redevice/        # Sui Move package and tests
-├── web/                  # React, TypeScript, Vite, and Tailwind frontend
-├── specs/                # Product specifications and AI prompts
-├── docs/                 # UX and engineering guidance
-├── AI_USAGE.md           # AI-assistance disclosure
-└── CONTRIBUTING.md       # Contribution and Git workflow
-```
-
-## Requirements
-
-- Node.js 22.22.2 (the CI version)
-- npm 11 or newer
-- Sui CLI configured for testnet (only for Move development)
-- a Sui-compatible wallet with testnet enabled (only for authorized actions)
-
-Public passport viewing does not require a wallet.
+Test data and repair notes are public on Testnet. Do not put private information in them. Yhlas only needs to share his **public `G...` address** to receive a role; never share a recovery phrase or private key.
 
 ## Run locally
 
-Install the committed workspace dependency graph and start the frontend:
+Requirements: Node.js 22.12.0 or newer, npm, and Freighter for signed actions.
 
-```bash
+```sh
 npm ci
+cp web/.env.example web/.env.local
+```
+
+Set the following public value in `web/.env.local`, then start Vite:
+
+```dotenv
+VITE_STELLAR_CONTRACT_ID=CDSP64KAEVFZ5QU3U2AMTNFWWF3CHEXRCFBSXWDESF6QSR3SHU2CWZCT
+```
+
+```sh
 npm run dev
 ```
 
-Run both commands from the repository root. The default Vite URL is
-`http://localhost:5173`. For a wallet-free walkthrough, use the clearly labeled
-demo fixture; it cannot create or update a passport. A live read requires a
-compatible Sui Testnet package/passport pair. Authorized writes additionally
-require the matching active capability, registry, and wallet on Testnet.
+The app opens at the URL Vite prints, usually `http://localhost:5173`. `VITE_PUBLIC_APP_ORIGIN` is optional; set it to a reachable HTTPS origin for a fixed QR domain. All `VITE_` values are included in the public browser build, so they must never contain secrets.
 
-Create an optional `web/.env.local` file to override the checked-in testnet defaults:
+## Checks and deployment
 
-```dotenv
-VITE_SUI_PACKAGE_ID=YOUR_PACKAGE_ID
-VITE_SUI_PASSPORT_ID=YOUR_PASSPORT_ID
-VITE_SUI_REPAIRER_CAP_ID=YOUR_REPAIRER_CAP_ID
-VITE_SUI_REGISTRAR_CAP_ID=YOUR_REGISTRAR_CAP_ID
-VITE_SUI_ADMIN_CAP_ID=YOUR_ADMIN_CAP_ID
-VITE_SUI_REGISTRY_ID=YOUR_DEVICE_REGISTRY_ID
-VITE_SUI_REPAIRER_ADDRESS=YOUR_REPAIRER_ADDRESS
-VITE_SUI_ISSUER_ADDRESS=YOUR_ISSUER_ADDRESS
-VITE_PUBLIC_APP_ORIGIN=https://your-deployed-app.example
-```
-
-`VITE_PUBLIC_APP_ORIGIN` is optional. Without it, QR codes use the current page
-origin; localhost QR codes are clearly warned as unusable from another device.
-For phone QR testing, set it to a reachable HTTPS deployment, not localhost.
-All `VITE_` values are visible in the browser build: use public object IDs only,
-never secrets or wallet recovery material. See
-[`docs/PREPARATION_A.md`](docs/PREPARATION_A.md) for read-only configuration
-checks and manual wallet scenarios.
-
-## Validate the project
-
-Frontend:
-
-```bash
-npm run build
+```sh
+npm run format:check
 npm run typecheck
 npm test
-npm run format:check
-npm audit --audit-level=high
+npm run test:fee-bump
+npm run build
 ```
 
-Move package:
+The latest local checks passed: **26 browser tests**, **1 fee-bump construction test**, and **12 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
 
-```bash
-cd move/redevice
-sui move build
-sui move test
+```sh
+cargo fmt --manifest-path stellar/Cargo.toml --check
+cargo test --manifest-path stellar/Cargo.toml --locked
+stellar contract build --manifest-path stellar/Cargo.toml --package redevice-stellar --locked
 ```
 
-## Digital Product Passport context
+Vercel builds from the repository root with [vercel.json](vercel.json). Set `VITE_STELLAR_CONTRACT_ID` as a build environment variable for each CLI deployment. The [ignore file](.vercelignore) excludes local environment files and contract build artifacts. The optional `/deploy` page handles a reviewed WASM upload, fee-bump signing, instance deployment, and initial role grants. The current contract is already deployed: use **Check existing upload** before any repeat upload. Stellar Lab's ordinary upload form could not represent the original WASM upload fee; the fee-bump flow succeeded on Testnet.
 
-ReDevice is inspired by the European Union's Digital Product Passport direction: durable product identity, QR-based access, traceable product information, and support for repair and circular use.
+## Remaining work
 
-ReDevice is an independent hackathon prototype. It is not connected to the official EU Digital Product Passport Registry and does not claim regulatory compliance.
+- Give Yhlas's Testnet account the Repairer role, remove that role from Akif when the separate-account test is ready, and add admin controls for managing other public addresses.
+- Test Yhlas's wallet on the hosted app, an unrelated account's rejected writes, role revocation, and phone QR scanning.
+- Exercise interrupted transaction recovery and archived-entry restoration on Testnet.
+- Record public upload, deployment, role, registration, and repair transaction hashes in the deployment record. Push and review the migration branch when the team is ready; Vercel is not yet linked to GitHub.
 
-- [European Commission — Digital Product Passport](https://single-market-economy.ec.europa.eu/single-market/digital-product-passport_en)
-- [European Commission — Digital Product Passport Registry is now live](https://single-market-economy.ec.europa.eu/news/digital-product-passport-registry-now-live-2026-07-20_en)
-
-## Starter and attribution
-
-The frontend began from Mysten Labs' `@mysten/create-dapp@0.7.11` `react-e2e-counter` starter. Counter-specific code was removed. The retained setup includes React, TypeScript, Vite, Tailwind CSS, Mysten dApp Kit, Sui code-generation configuration, and reusable UI primitives.
-
-See [AI_USAGE.md](AI_USAGE.md) for the AI-assistance disclosure,
-[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow, and
-[docs/PRE_HACKATHON_FIXES.md](docs/PRE_HACKATHON_FIXES.md) for the dated
-pre-event reliability remediation record.
-
-## Project status
-
-ReDevice is an ETHGlobal Lisbon 2026 Sui prototype being prepared for a later
-HackMeridian Stellar implementation. The Sui source and original history remain
-preserved. This pre-event work improves reproducibility, tests, CI, provenance,
-error handling, QR/PDF behavior, and transaction feedback; it does not make the
-checked-in Sui deployment end-to-end operational or establish hackathon
-eligibility.
+See [the Stellar integration plan](docs/stellar_integration.md) for the schema, test gates, and remaining migration details. The earlier Sui prototype remains in Git history; its records are not presented as Stellar records.

@@ -10,6 +10,7 @@ on:
       - ".github/workflows/frontend-checks.yml"
       - "package.json"
       - "package-lock.json"
+      - "scripts/**"
       - "web/**"
 
 permissions:
@@ -30,6 +31,7 @@ jobs:
       - run: npx --yes npm@11.6.2 run format:check
       - run: npx --yes npm@11.6.2 run typecheck
       - run: npx --yes npm@11.6.2 test
+      - run: npx --yes npm@11.6.2 run test:fee-bump
       - run: npx --yes npm@11.6.2 run build
       - name: Dependency audit (high and critical)
         run: npx --yes npm@11.6.2 audit --audit-level=high

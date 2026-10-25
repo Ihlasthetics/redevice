@@ -1,0 +1,15 @@
+/\.agents/
+/\.codex/
+/\.git/
+/\.github/
+/docs/
+/move/
+/scripts/
+/specs/
+/stellar/
+/node_modules/
+web/node_modules/
+web/dist/
+.env*
+web/.env*
+*.local

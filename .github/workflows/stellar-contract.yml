@@ -1,0 +1,35 @@
+name: Stellar contract checks
+
+on:
+  push:
+    paths:
+      - ".github/workflows/stellar-contract.yml"
+      - "stellar/**"
+  pull_request:
+    paths:
+      - ".github/workflows/stellar-contract.yml"
+      - "stellar/**"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust and the Stellar target
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --target wasm32v1-none
+          rustup default 1.99.1
+      - name: Install Stellar CLI 28.1.0
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz -o "$RUNNER_TEMP/stellar-cli.tar.gz"
+          echo "c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462  $RUNNER_TEMP/stellar-cli.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/stellar-cli"
+          tar -xzf "$RUNNER_TEMP/stellar-cli.tar.gz" -C "$RUNNER_TEMP/stellar-cli" stellar
+          echo "$RUNNER_TEMP/stellar-cli" >> "$GITHUB_PATH"
+      - run: cargo fmt --manifest-path stellar/Cargo.toml --check
+      - run: cargo test --manifest-path stellar/Cargo.toml --locked
+      - run: stellar contract build --manifest-path stellar/Cargo.toml --package redevice-stellar --locked

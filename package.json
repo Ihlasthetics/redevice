@@ -2,7 +2,7 @@
   "name": "redevice",
   "private": true,
   "version": "0.0.0",
-  "description": "Verifiable repair histories for refurbished electronics on Sui",
+  "description": "Verifiable repair histories for refurbished electronics on Stellar",
   "workspaces": [
     "web"
   ],
@@ -11,7 +11,9 @@
     "build": "npm run build --workspace @redevice/web",
     "typecheck": "npm run typecheck --workspace @redevice/web",
     "format:check": "npm run format:check --workspace @redevice/web",
-    "test": "npm run test --workspace @redevice/web"
+    "test": "npm run test --workspace @redevice/web",
+    "test:fee-bump": "node --test scripts/build-upload-fee-bump.test.mjs",
+    "testnet:preflight": "node scripts/check-testnet-upload.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

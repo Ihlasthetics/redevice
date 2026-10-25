@@ -6,13 +6,14 @@ dist/
 .env.*
 !.env.example
 
-# Sui Move build output and local publication state
-move/**/build/
-move/**/Published.toml
-
-# Generated frontend bindings
-web/src/contracts/
+stellar/target/
+stellar/**/test_snapshots/
 
 # Editor files
 .idea/
 .vscode/
+.vercel/
+
+# Local agent tooling and downloaded skills
+.agents/
+skills-lock.json

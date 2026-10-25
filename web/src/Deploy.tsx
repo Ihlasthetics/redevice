@@ -1,0 +1,244 @@
+import { useState } from "react";
+import {
+  connectDeployWallet,
+  deployInstance,
+  formatXlm,
+  grantOwnRole,
+  previewUpload,
+  submitUpload,
+  verifyUploadedWasm,
+  type UploadPreview,
+} from "./stellar/deploy";
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : "Operation failed.";
+
+export default function Deploy() {
+  const [account, setAccount] = useState("");
+  const [preview, setPreview] = useState<UploadPreview | null>(null);
+  const [wasmHash, setWasmHash] = useState("");
+  const [contractId, setContractId] = useState("");
+  const [registrarGranted, setRegistrarGranted] = useState(false);
+  const [repairerGranted, setRepairerGranted] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [hash, setHash] = useState("");
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await action();
+    } catch (error) {
+      setNotice(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const submitted = (value: string) => {
+    setHash(value);
+    setNotice("Submitted. Waiting for final confirmation…");
+  };
+
+  return (
+    <main className="mx-auto max-w-2xl space-y-6 p-6 text-ink">
+      <a href="/" className="text-sm underline">
+        ← ReDevice
+      </a>
+      <h1 className="text-3xl font-bold">Testnet contract setup</h1>
+      <p>
+        Use your Freighter Testnet account. The contract file stays in this
+        browser until the unsigned upload simulation and signed transaction are
+        sent to Stellar Testnet RPC. Every on-chain step asks for wallet
+        approval.
+      </p>
+
+      <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="text-xl font-semibold">
+          1. Connect and check the upload fee
+        </h2>
+        <button
+          disabled={busy}
+          className="rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
+          onClick={() =>
+            void run(async () => {
+              const address = await connectDeployWallet();
+              setAccount(address);
+              setPreview(null);
+              setNotice(`Connected ${address}`);
+            })
+          }
+        >
+          Connect Freighter
+        </button>
+        {account && <p className="break-all text-sm">{account}</p>}
+        <label className="block text-sm">
+          Select{" "}
+          <code>
+            stellar/target/wasm32v1-none/release/redevice_stellar.wasm
+          </code>
+          <input
+            className="mt-2 block w-full"
+            type="file"
+            accept=".wasm,application/wasm"
+            disabled={busy}
+            onChange={(event) => {
+              setFile(event.target.files?.[0] ?? null);
+              setPreview(null);
+            }}
+          />
+        </label>
+        <button
+          disabled={busy || !account || !file}
+          className="rounded-xl border border-line px-4 py-2 disabled:opacity-50"
+          onClick={() =>
+            void run(async () => {
+              const next = await previewUpload(
+                new Uint8Array(await file!.arrayBuffer()),
+                account,
+              );
+              setPreview(next);
+              setNotice(
+                "Upload simulation ready. Review the fee before signing.",
+              );
+            })
+          }
+        >
+          Simulate upload
+        </button>
+        {preview && (
+          <p className="font-semibold">
+            Maximum fee bid: {formatXlm(preview.fee)} Testnet XLM
+          </p>
+        )}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="text-xl font-semibold">2. Upload the reviewed WASM</h2>
+        <p className="text-sm">
+          Freighter will ask you to sign the inner upload, then its fee bump.
+          Review both prompts. If a prompt fails, simulate again.
+        </p>
+        <button
+          disabled={busy || !preview || !!wasmHash}
+          className="rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
+          onClick={() =>
+            void run(async () => {
+              const result = await submitUpload(preview!, submitted);
+              setWasmHash(result.wasmHash);
+              setNotice("WASM upload confirmed and read back from Testnet.");
+            })
+          }
+        >
+          Sign and upload
+        </button>
+        <button
+          disabled={busy || !account || !!wasmHash}
+          className="ml-3 rounded-xl border border-line px-4 py-2 disabled:opacity-50"
+          onClick={() =>
+            void run(async () => {
+              const verifiedHash = await verifyUploadedWasm();
+              setWasmHash(verifiedHash);
+              setNotice(
+                "Reviewed WASM is already on Testnet. Continue to deployment.",
+              );
+            })
+          }
+        >
+          Check existing upload
+        </button>
+        {wasmHash && <p className="break-all text-sm">WASM hash: {wasmHash}</p>}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="text-xl font-semibold">3. Deploy a contract instance</h2>
+        <p className="text-sm">
+          Your connected account becomes the administrator.
+        </p>
+        <button
+          disabled={busy || !wasmHash || !!contractId}
+          className="rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
+          onClick={() =>
+            void run(async () => {
+              const result = await deployInstance(account, wasmHash, submitted);
+              setContractId(result.contractId);
+              setNotice("Contract deployment confirmed.");
+            })
+          }
+        >
+          Deploy instance
+        </button>
+        {contractId && (
+          <p className="break-all text-sm">Contract ID: {contractId}</p>
+        )}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="text-xl font-semibold">4. Enable your test account</h2>
+        <p className="text-sm">
+          Grant this account each role in a separate transaction to test
+          registration and repairs.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button
+            disabled={busy || !contractId || registrarGranted}
+            className="rounded-xl border border-line px-4 py-2 disabled:opacity-50"
+            onClick={() =>
+              void run(async () => {
+                await grantOwnRole(account, contractId, "Registrar", submitted);
+                setRegistrarGranted(true);
+                setNotice("Registrar role granted.");
+              })
+            }
+          >
+            Grant Registrar
+          </button>
+          <button
+            disabled={busy || !contractId || repairerGranted}
+            className="rounded-xl border border-line px-4 py-2 disabled:opacity-50"
+            onClick={() =>
+              void run(async () => {
+                await grantOwnRole(account, contractId, "Repairer", submitted);
+                setRepairerGranted(true);
+                setNotice("Repairer role granted.");
+              })
+            }
+          >
+            Grant Repairer
+          </button>
+        </div>
+        {contractId && (
+          <p className="text-sm">
+            Set <code>VITE_STELLAR_CONTRACT_ID={contractId}</code> in{" "}
+            <code>web/.env.local</code>, restart the app, then open{" "}
+            <a href="/" className="underline">
+              ReDevice
+            </a>
+            .
+          </p>
+        )}
+      </section>
+
+      {notice && (
+        <p role="status" className="rounded-xl border border-line p-3">
+          {notice}
+        </p>
+      )}
+      {hash && (
+        <p className="break-all text-sm">
+          Transaction:{" "}
+          <a
+            className="underline"
+            href={`https://stellar.expert/explorer/testnet/tx/${hash}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {hash}
+          </a>
+        </p>
+      )}
+    </main>
+  );
+}

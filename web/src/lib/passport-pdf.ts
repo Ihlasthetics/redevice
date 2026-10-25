@@ -43,7 +43,7 @@ export async function createPassportPdf(input: PassportPdfInput) {
   pdf.line(18, 135, 192, 135);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(10);
-  pdf.text("PASSPORT OBJECT ID", 18, 147);
+  pdf.text("STELLAR CONTRACT / DEVICE ID", 18, 147);
   pdf.setFont("courier", "normal");
   pdf.setFontSize(9);
   pdf.text(pdf.splitTextToSize(input.passportId, 174), 18, 155);
@@ -54,7 +54,7 @@ export async function createPassportPdf(input: PassportPdfInput) {
   pdf.textWithLink("Open public passport", 18, 175, {
     url: input.qrTarget,
   });
-  pdf.textWithLink("Inspect the object in SuiVision", 18, 182, {
+  pdf.textWithLink("Inspect the contract on Stellar Expert", 18, 182, {
     url: input.explorerUrl,
   });
   pdf.text(

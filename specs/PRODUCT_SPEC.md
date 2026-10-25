@@ -8,9 +8,9 @@ the supporting evidence was later replaced.
 
 ## Product promise
 
-ReDevice proves which authorized repairer attested to a repair, when the
-attestation occurred, and which public evidence supports it. It does not claim
-to cryptographically prove that physical work happened.
+ReDevice records which authorized repairer attested to a repair and when the
+attestation occurred. It does not claim to cryptographically prove that physical
+work happened.
 
 ## Users
 
@@ -27,11 +27,11 @@ to cryptographically prove that physical work happened.
    verification level, and repair timeline.
 4. Connect an authorized repairer wallet.
 5. Add a battery replacement with 96% health.
-6. Attach public, non-sensitive evidence stored on Walrus.
-7. Confirm a real Sui testnet transaction.
+6. Submit public, non-sensitive repair notes; optional external evidence is outside the MVP.
+7. Confirm a real Stellar Testnet transaction.
 8. Refresh the passport and see the new record.
 9. Attempt the same action with an unauthorized wallet.
-10. Show Move rejecting it and open the successful transaction in Sui Explorer.
+10. Show the Soroban contract rejecting it and open the successful transaction in Stellar Expert.
 
 ## Trust boundaries
 
@@ -39,7 +39,7 @@ to cryptographically prove that physical work happened.
 - History before the coverage start date is explicitly unknown.
 - A copied QR remains possible; the buyer compares the masked serial with the
   physical device.
-- Walrus evidence must never contain full serial numbers, invoices, customer
+- Public notes must never contain full serial numbers, invoices, customer
   names, addresses, private documents, recovery phrases, or private keys.
 
 ## Out of scope for the hackathon MVP
@@ -47,6 +47,6 @@ to cryptographically prove that physical work happened.
 - marketplace
 - AI features
 - backend database
-- zkLogin, Seal or unrelated sponsor integrations
+- unrelated sponsor integrations
 - production manufacturer onboarding
 - ownership transfer unless the core demo is complete

@@ -6,7 +6,8 @@ import { createPassportPdf } from "./passport-pdf";
 
 describe("passport PDF generation", () => {
   it("creates an openable PDF from a QR that decodes to the intended target", async () => {
-    const qrTarget = `https://passport.example/?passport=0x${"a".repeat(64)}`;
+    const qrTarget =
+      "https://passport.example/passport/stellar-testnet/CONTRACT/1";
     const qrDataUrl = await QRCode.toDataURL(qrTarget, {
       width: 720,
       margin: 2,
@@ -29,13 +30,13 @@ describe("passport PDF generation", () => {
     const pdf = await createPassportPdf({
       qrDataUrl,
       qrTarget,
-      passportId: `0x${"a".repeat(64)}`,
+      passportId: "CONTRACT/1",
       deviceName: "Verification laptop",
       brand: "ReDevice",
       model: "Test model",
       maskedSerial: "ABC•••1234",
       registeredDate: "15 October 2026",
-      explorerUrl: "https://testnet.suivision.xyz/object/test",
+      explorerUrl: "https://stellar.expert/explorer/testnet/contract/test",
     });
     const bytes = new Uint8Array(pdf.output("arraybuffer"));
 

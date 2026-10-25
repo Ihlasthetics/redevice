@@ -1,6 +1,9 @@
 import {
+  getAddress,
   getNetwork,
+  isAllowed,
   requestAccess,
+  signAuthEntry,
   signTransaction,
 } from "@stellar/freighter-api";
 import { Networks, StrKey, contract, rpc } from "@stellar/stellar-sdk";
@@ -14,6 +17,7 @@ export const NETWORK = Networks.TESTNET;
 export const RPC_URL = "https://soroban-testnet.stellar.org";
 export const CONTRACT_ID =
   import.meta.env.VITE_STELLAR_CONTRACT_ID?.trim() ?? "";
+export const FIVE_DIGIT_IDS = import.meta.env.VITE_FIVE_DIGIT_IDS === "true";
 export type Status = "Used" | "Repaired" | "Refurbished" | "PartsOnly";
 export type Device = {
   id: bigint;
@@ -52,8 +56,14 @@ export function requireContractId(value = CONTRACT_ID) {
   return value;
 }
 
+export function parseDeviceId(value: string) {
+  if (FIVE_DIGIT_IDS && !/^[1-9][0-9]{4}$/.test(value))
+    throw new Error("Device ID must be exactly five digits.");
+  return parseStellarDeviceId(value);
+}
+
 export function passportPath(id: string, contractId = requireContractId()) {
-  return `/passport/stellar-testnet/${contractId}/${parseStellarDeviceId(id)}`;
+  return `/passport/stellar-testnet/${contractId}/${parseDeviceId(id)}`;
 }
 
 export function publicPassportUrl(id: string, configuredOrigin?: string) {
@@ -89,7 +99,7 @@ export function parsePassportPath(
     return null;
   return {
     contractId: requireContractId(parts[3]),
-    id: parseStellarDeviceId(parts[4]),
+    id: parseDeviceId(parts[4]),
   };
 }
 
@@ -97,7 +107,7 @@ export function deviceExplorerUrl(
   id: string,
   contractId = requireContractId(),
 ) {
-  parseStellarDeviceId(id);
+  parseDeviceId(id);
   return `https://stellar.expert/explorer/testnet/contract/${contractId}`;
 }
 
@@ -124,7 +134,7 @@ async function read<T>(
 
 export async function getDevice(id: string) {
   return read<Device | null>("get_device", {
-    device_id: BigInt(parseStellarDeviceId(id)),
+    device_id: BigInt(parseDeviceId(id)),
   });
 }
 
@@ -136,7 +146,7 @@ export async function getRepairs(id: string, count: number) {
     pages.push(
       ...(
         await read<contract.Result<Repair[]>>("get_repairs", {
-          device_id: BigInt(parseStellarDeviceId(id)),
+          device_id: BigInt(parseDeviceId(id)),
           start,
           limit: Math.min(20, count - start),
         })
@@ -152,6 +162,10 @@ export async function hasRole(role: "Registrar" | "Repairer", account: string) {
   return read<boolean>("has_role", { role: { tag: role }, account });
 }
 
+export async function getAdministrator() {
+  return read<string>("admin", {});
+}
+
 export async function connectWallet() {
   const access = await requestAccess();
   if (access.error || !StrKey.isValidEd25519PublicKey(access.address))
@@ -160,6 +174,20 @@ export async function connectWallet() {
     );
   await assertWallet(access.address);
   return access.address;
+}
+
+export async function getConnectedWallet(): Promise<string | null> {
+  const permission = await isAllowed();
+  if (permission.error || !permission.isAllowed) return null;
+  const [current, network] = await Promise.all([getAddress(), getNetwork()]);
+  if (
+    current.error ||
+    !StrKey.isValidEd25519PublicKey(current.address) ||
+    network.error ||
+    network.networkPassphrase !== NETWORK
+  )
+    return null;
+  return current.address;
 }
 
 async function assertWallet(account: string) {
@@ -179,9 +207,17 @@ type WriteMethods = {
     args: Record<string, unknown>,
     options?: contract.MethodOptions,
   ) => Promise<contract.AssembledTransaction<contract.Result<number>>>;
+  grant_role: (
+    args: Record<string, unknown>,
+    options?: contract.MethodOptions,
+  ) => Promise<contract.AssembledTransaction<contract.Result<void>>>;
+  revoke_role: (
+    args: Record<string, unknown>,
+    options?: contract.MethodOptions,
+  ) => Promise<contract.AssembledTransaction<contract.Result<void>>>;
 };
 
-export async function write<T extends bigint | number>(
+export async function write<T extends bigint | number | void>(
   account: string,
   method: keyof WriteMethods,
   args: Record<string, unknown>,
@@ -210,9 +246,40 @@ export async function write<T extends bigint | number>(
         );
       return signed;
     },
+    signAuthEntry: async (entry, options) => {
+      await assertWallet(account);
+      const signed = await signAuthEntry(entry, {
+        ...options,
+        networkPassphrase: NETWORK,
+        address: account,
+      });
+      if (
+        signed.error ||
+        !signed.signedAuthEntry ||
+        signed.signerAddress !== account
+      )
+        throw new Error(
+          signed.error?.message ??
+            "Freighter did not authorize with the selected account.",
+        );
+      return {
+        signedAuthEntry: signed.signedAuthEntry,
+        signerAddress: signed.signerAddress,
+      };
+    },
   });
   const tx = await client[method](args, { timeoutInSeconds: 45 });
   if (tx.isReadCall) throw new Error("Expected a write transaction.");
+  const unsigned = tx.needsNonInvokerSigningBy();
+  if (unsigned.length) {
+    if (unsigned.length !== 1 || unsigned[0] !== account)
+      throw new Error(
+        `Transaction needs authorization from ${unsigned.join(", ")}.`,
+      );
+    await tx.signAuthEntries({ address: account });
+    if (tx.needsNonInvokerSigningBy().length)
+      throw new Error("Soroban authorization is still unsigned.");
+  }
   let submittedHash: string | undefined;
   const sent = await tx
     .signAndSend({
@@ -239,6 +306,31 @@ export async function write<T extends bigint | number>(
       `Transaction finality is unknown${hash ? ` (${hash})` : ""}. Check the explorer before retrying.`,
     );
   return { result: sent.result.unwrap() as T, hash };
+}
+
+export async function changeRepairerRole(
+  admin: string,
+  account: string,
+  grant: boolean,
+) {
+  if (!StrKey.isValidEd25519PublicKey(account))
+    throw new Error("Enter a valid repairer wallet address.");
+  if ((await getAdministrator()) !== admin)
+    throw new Error(
+      "The connected wallet is not this contract's administrator.",
+    );
+  const current = await hasRole("Repairer", account);
+  if (current === grant)
+    throw new Error(
+      grant
+        ? "This account is already a repairer."
+        : "This account is not a repairer.",
+    );
+  return write<void>(admin, grant ? "grant_role" : "revoke_role", {
+    admin,
+    role: { tag: "Repairer" },
+    account,
+  });
 }
 
 function requestId(key: string) {
@@ -310,7 +402,7 @@ export async function attestRepair(
   const result = await write<number>(account, "attest_repair", {
     repairer: account,
     request_id: requestId(key),
-    device_id: BigInt(parseStellarDeviceId(fields.deviceId)),
+    device_id: BigInt(parseDeviceId(fields.deviceId)),
     repair_type: fields.repairType.trim(),
     notes: fields.notes.trim(),
     next_status: { tag: fields.status },

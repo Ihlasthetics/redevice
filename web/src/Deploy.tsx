@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  connectDeployWallet,
   deployInstance,
   formatXlm,
   grantOwnRole,
@@ -9,16 +8,17 @@ import {
   verifyUploadedWasm,
   type UploadPreview,
 } from "./stellar/deploy";
+import { useWallet } from "./stellar/useWallet";
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "Operation failed.";
 
 export default function Deploy() {
-  const [account, setAccount] = useState("");
+  const { wallet, connect } = useWallet();
+  const account = wallet ?? "";
   const [preview, setPreview] = useState<UploadPreview | null>(null);
   const [wasmHash, setWasmHash] = useState("");
   const [contractId, setContractId] = useState("");
-  const [registrarGranted, setRegistrarGranted] = useState(false);
   const [repairerGranted, setRepairerGranted] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,10 +49,11 @@ export default function Deploy() {
       </a>
       <h1 className="text-3xl font-bold">Testnet contract setup</h1>
       <p>
-        Use your Freighter Testnet account. The contract file stays in this
-        browser until the unsigned upload simulation and signed transaction are
-        sent to Stellar Testnet RPC. Every on-chain step asks for wallet
-        approval.
+        Use your Freighter Testnet account. The reviewed five digit ID WASM is
+        already uploaded to Testnet, so you can connect and select{" "}
+        <strong>Check existing upload</strong> below. Deploying an instance
+        requires wallet approval; new instances start without device records or
+        Repairer grants.
       </p>
 
       <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
@@ -64,8 +65,7 @@ export default function Deploy() {
           className="rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
           onClick={() =>
             void run(async () => {
-              const address = await connectDeployWallet();
-              setAccount(address);
+              const address = await connect();
               setPreview(null);
               setNotice(`Connected ${address}`);
             })
@@ -176,25 +176,12 @@ export default function Deploy() {
       </section>
 
       <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
-        <h2 className="text-xl font-semibold">4. Enable your test account</h2>
+        <h2 className="text-xl font-semibold">4. Authorize a repairer</h2>
         <p className="text-sm">
-          Grant this account each role in a separate transaction to test
-          registration and repairs.
+          Any connected wallet can register a device. Only grant the Repairer
+          role to an account you trust to attest real repairs.
         </p>
         <div className="flex flex-wrap gap-3">
-          <button
-            disabled={busy || !contractId || registrarGranted}
-            className="rounded-xl border border-line px-4 py-2 disabled:opacity-50"
-            onClick={() =>
-              void run(async () => {
-                await grantOwnRole(account, contractId, "Registrar", submitted);
-                setRegistrarGranted(true);
-                setNotice("Registrar role granted.");
-              })
-            }
-          >
-            Grant Registrar
-          </button>
           <button
             disabled={busy || !contractId || repairerGranted}
             className="rounded-xl border border-line px-4 py-2 disabled:opacity-50"

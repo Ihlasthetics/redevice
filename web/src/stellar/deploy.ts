@@ -1,6 +1,7 @@
 import {
   getNetwork,
   requestAccess,
+  signAuthEntry,
   signTransaction,
 } from "@stellar/freighter-api";
 import {
@@ -17,7 +18,7 @@ import {
 
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const EXPECTED_WASM_SHA256 =
-  "77bb782f87eee60ad687fa78cf31c4b2e221e4a12469ce657438a1d3ef2d22d0";
+  "d5d3a7c0e9a92af5ff41b949ad28745bb9572143243076e4d11e91df456914eb";
 const server = new rpc.Server(RPC_URL);
 
 export type UploadPreview = {
@@ -264,12 +265,43 @@ export async function grantOwnRole(
     networkPassphrase: Networks.TESTNET,
     publicKey: account,
     signTransaction: walletSigner(account),
+    signAuthEntry: async (entry, options) => {
+      await assertWallet(account);
+      const signed = await signAuthEntry(entry, {
+        ...options,
+        networkPassphrase: Networks.TESTNET,
+        address: account,
+      });
+      if (
+        signed.error ||
+        !signed.signedAuthEntry ||
+        signed.signerAddress !== account
+      )
+        throw new Error(
+          signed.error?.message ??
+            "Freighter did not authorize this role grant.",
+        );
+      return {
+        signedAuthEntry: signed.signedAuthEntry,
+        signerAddress: signed.signerAddress,
+      };
+    },
   });
   const tx = await client.grant_role({
     admin: account,
     role: { tag: role },
     account,
   });
+  const unsigned = tx.needsNonInvokerSigningBy();
+  if (unsigned.length) {
+    if (unsigned.length !== 1 || unsigned[0] !== account)
+      throw new Error(
+        `Role grant needs authorization from ${unsigned.join(", ")}.`,
+      );
+    await tx.signAuthEntries({ address: account });
+    if (tx.needsNonInvokerSigningBy().length)
+      throw new Error("Role grant authorization is still unsigned.");
+  }
   const sent = await tx.signAndSend({
     watcher: {
       onSubmitted: (response) => response && onSubmitted(response.hash),

@@ -7,6 +7,9 @@ use soroban_sdk::{
 
 const TTL_THRESHOLD: u32 = 17_280;
 const TTL_TARGET: u32 = 518_400;
+const MIN_DEVICE_ID: u64 = 10_000;
+const MAX_DEVICE_ID: u64 = 99_999;
+const ID_DRAW_ATTEMPTS: u32 = 64;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -28,7 +31,6 @@ pub enum LifecycleStatus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DataKey {
     Admin,
-    NextDeviceId,
     Role(Role, Address),
     Serial(BytesN<32>),
     Device(u64),
@@ -144,7 +146,7 @@ pub enum ContractError {
     DuplicateDevice = 4,
     InvalidInput = 5,
     DuplicateRequest = 6,
-    IdOverflow = 7,
+    IdAllocationFailed = 7,
     DeviceNotFound = 8,
     InvalidTransition = 9,
     InvalidBatteryHealth = 10,
@@ -160,7 +162,6 @@ impl ReDevice {
     pub fn __constructor(env: Env, admin: Address) {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::NextDeviceId, &1u64);
         touch_instance(&env);
     }
 
@@ -270,10 +271,6 @@ impl ReDevice {
         status: LifecycleStatus,
     ) -> Result<u64, ContractError> {
         registrar.require_auth();
-        let role_key = DataKey::Role(Role::Registrar, registrar.clone());
-        if !env.storage().persistent().has(&role_key) {
-            return Err(ContractError::Unauthorized);
-        }
         let fields = RegistrationFields {
             serial_commitment: serial_commitment.clone(),
             manufacturer_namespace: manufacturer_namespace.clone(),
@@ -310,12 +307,15 @@ impl ReDevice {
         if env.storage().persistent().has(&serial_key) {
             return Err(ContractError::DuplicateDevice);
         }
-        let id: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::NextDeviceId)
-            .unwrap();
-        let next_id = id.checked_add(1).ok_or(ContractError::IdOverflow)?;
+        let mut id = None;
+        for _ in 0..ID_DRAW_ATTEMPTS {
+            let candidate = env.prng().gen_range(MIN_DEVICE_ID..=MAX_DEVICE_ID);
+            if !env.storage().persistent().has(&DataKey::Device(candidate)) {
+                id = Some(candidate);
+                break;
+            }
+        }
+        let id = id.ok_or(ContractError::IdAllocationFailed)?;
         let device = Device {
             id,
             commitment_version: 1,
@@ -331,9 +331,6 @@ impl ReDevice {
             repair_count: 0,
         };
         let device_key = DataKey::Device(id);
-        env.storage()
-            .instance()
-            .set(&DataKey::NextDeviceId, &next_id);
         env.storage().persistent().set(&serial_key, &id);
         env.storage().persistent().set(&device_key, &device);
         env.storage().persistent().set(
@@ -343,7 +340,6 @@ impl ReDevice {
                 device_id: id,
             },
         );
-        touch_persistent(&env, &role_key);
         touch_persistent(&env, &serial_key);
         touch_persistent(&env, &device_key);
         touch_persistent(&env, &request_key);

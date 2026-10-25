@@ -1,9 +1,9 @@
 use super::{
     ContractError, DataKey, DeviceRegistered, LifecycleStatus, ReDevice, ReDeviceClient,
-    RepairAttested, Role, TTL_THRESHOLD,
+    RepairAttested, Role, MAX_DEVICE_ID, MIN_DEVICE_ID, TTL_THRESHOLD,
 };
 use soroban_sdk::testutils::{storage::Persistent as _, Address as _, Events as _, Ledger};
-use soroban_sdk::{Address, BytesN, Env, Event, String};
+use soroban_sdk::{Address, BytesN, Env, Event, String, Vec};
 
 fn setup() -> (Env, Address, Address, Address) {
     let env = Env::default();
@@ -56,15 +56,13 @@ fn attest(
 }
 
 #[test]
-fn registration_is_authorized_unique_and_publicly_readable() {
-    let (env, contract_id, admin, registrar) = setup();
+fn registration_is_wallet_signed_unique_and_publicly_readable() {
+    let (env, contract_id, _admin, registrar) = setup();
     let client = ReDeviceClient::new(&env, &contract_id);
     env.ledger()
         .with_mut(|ledger| ledger.timestamp = 1_700_000_000);
-    client.grant_role(&admin, &Role::Registrar, &registrar);
-
     let id = register(&client, &env, &registrar, 1, 2, LifecycleStatus::Used);
-    assert_eq!(id, 1);
+    assert!((MIN_DEVICE_ID..=MAX_DEVICE_ID).contains(&id));
     assert_eq!(
         env.events().all(),
         [DeviceRegistered {
@@ -89,40 +87,46 @@ fn registration_is_authorized_unique_and_publicly_readable() {
         client.get_device_by_commitment(&BytesN::from_array(&env, &[2; 32])),
         Some(id)
     );
-    assert_eq!(client.get_device(&2), None);
+    assert_eq!(client.get_device(&1), None);
 }
 
 #[test]
-fn ungranted_and_revoked_registrars_cannot_register() {
+fn registrations_receive_distinct_five_digit_ids() {
+    let (env, contract_id, _admin, registrar) = setup();
+    let client = ReDeviceClient::new(&env, &contract_id);
+    let mut ids = Vec::new(&env);
+    for number in 1..=25 {
+        let id = register(
+            &client,
+            &env,
+            &registrar,
+            number,
+            number,
+            LifecycleStatus::Used,
+        );
+        assert!((MIN_DEVICE_ID..=MAX_DEVICE_ID).contains(&id));
+        assert!(!ids.contains(&id));
+        ids.push_back(id);
+    }
+}
+
+#[test]
+fn ungranted_and_revoked_registrars_can_register() {
     let (env, contract_id, admin, registrar) = setup();
     let client = ReDeviceClient::new(&env, &contract_id);
-    let args = (
-        &registrar,
-        &BytesN::from_array(&env, &[1; 32]),
-        &BytesN::from_array(&env, &[2; 32]),
-        &String::from_str(&env, "lenovo"),
-        &String::from_str(&env, "thinkpad-t14"),
-        &String::from_str(&env, "Lenovo"),
-        &String::from_str(&env, "ThinkPad T14"),
-        &String::from_str(&env, "***AB9"),
-        &LifecycleStatus::Used,
-    );
-    assert_eq!(
-        client.try_register_device(
-            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7, args.8
-        ),
-        Err(Ok(ContractError::Unauthorized))
-    );
+    let first_id = register(&client, &env, &registrar, 1, 2, LifecycleStatus::Used);
+    assert!((MIN_DEVICE_ID..=MAX_DEVICE_ID).contains(&first_id));
 
     client.grant_role(&admin, &Role::Registrar, &registrar);
     client.revoke_role(&admin, &Role::Registrar, &registrar);
     assert_eq!(
-        client.try_register_device(
-            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7, args.8
-        ),
-        Err(Ok(ContractError::Unauthorized))
+        register(&client, &env, &registrar, 1, 2, LifecycleStatus::Used),
+        first_id
     );
     assert!(!client.has_role(&Role::Registrar, &registrar));
+    let second_id = register(&client, &env, &registrar, 3, 4, LifecycleStatus::Used);
+    assert!((MIN_DEVICE_ID..=MAX_DEVICE_ID).contains(&second_id));
+    assert_ne!(first_id, second_id);
 }
 
 #[test]
@@ -205,10 +209,9 @@ fn replay_returns_the_same_device_and_changed_arguments_fail() {
         ),
         Err(Ok(ContractError::DuplicateRequest))
     );
-    assert_eq!(
-        register(&client, &env, &registrar, 2, 3, LifecycleStatus::Used),
-        2
-    );
+    let second_id = register(&client, &env, &registrar, 2, 3, LifecycleStatus::Used);
+    assert!((MIN_DEVICE_ID..=MAX_DEVICE_ID).contains(&second_id));
+    assert_ne!(id, second_id);
 }
 
 #[test]

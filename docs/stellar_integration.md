@@ -2,7 +2,7 @@
 
 HackMeridian work starts from `main` at `9e41f617aeaad999efca967da472d166e03b97fb` on 25 October 2026. The active repository is now Stellar-only; the earlier prototype remains in Git history. Yhlas's public-experience PR #10 predates this migration and needs a careful manual port rather than a direct merge.
 
-**Current milestone:** the reviewed contract is live on Stellar Testnet, Akif completed a registration and repair through the local browser, public RPC reads return device 1 and its repair, and the browser is hosted at [redevice-delta.vercel.app](https://redevice-delta.vercel.app). The Vercel project was deployed from the local checkout and is not connected to GitHub. Yhlas's separate account, cross-device passport viewing, and phone QR scanning remain to be tested.
+**Current milestone, 25 October 2026:** a second contract was deployed at `CCHXDDGMOZNABGIYGBOIWCFHD3RECIKI2UWJKMOGRBCSSIL6YACCX6WJ` with WASM SHA-256 `538b6343ce351890bb53fcb27b6f8c1075b5af2eb9dead3debf06cc0b9004d70`. Its administrator is `GBYKDBAWYNIVU24MVH2ENOYFLSU7LXRNHFWJ7WOPF3Q76C3MDV5SWCLD`. Any wallet may register a device; Repairer authorization remains mandatory for attestations. The contract now contains device 1 and one repair. Its deployment transaction is `9b5919d2e25acc9522f41cde24eb646866fb64f8750294e40a71087e323b4a8a`. The personal Vercel project is `yhlas/redevice` at [redevice-six.vercel.app](https://redevice-six.vercel.app). The earlier contract and its device 1 remain on Testnet at the old address documented below.
 
 ## Scope and working rules
 
@@ -54,7 +54,7 @@ Akif registered device 1 and attested one repair through the browser; public RPC
 
 The browser uses `@stellar/stellar-sdk` and Freighter for authorized signing, with wallet-free reads. It validates the configured network and contract ID before a write and distinguishes configuration or RPC failures from missing authorization. Registration, repair, authorization checks, passport mapping, QR/PDF routes, and explorer links use Stellar. The earlier runtime was removed at the team's request; the browser shows a clear unconfigured state if the contract ID is missing.
 
-**Current state:** the browser has wallet-free reads, Freighter role checks and signing, registration, repair attestation, Stellar routes, camera QR scanning, PDF generation, and explorer links. The `/deploy` page handled the live upload, deployment, and initial role grants. The browser is hosted at [redevice-delta.vercel.app](https://redevice-delta.vercel.app), and its public homepage and passport deep link respond over HTTPS. Akif reported successful registration and repair locally. Yhlas's wallet, disconnected-browser read, phone QR scan, and unauthorized/revoked-account scenarios remain unverified. The admin UI can only grant roles to its own connected account; managing another account and revocation requires additional UI or a direct contract call. Port selected visual improvements from PR #10 only after review.
+**Previous contract state (before open registration):** the browser had wallet-free reads, Freighter role checks and signing, registration, repair attestation, Stellar routes, camera QR scanning, PDF generation, and explorer links. The `/deploy` page handled the first live upload, deployment, and initial role grants. The first browser deployment was hosted at [redevice-delta.vercel.app](https://redevice-delta.vercel.app), and its public homepage and passport deep link responded over HTTPS. Akif reported successful registration and repair locally. The admin UI could only grant roles to its own connected account; managing another account and revocation requires additional UI or a direct contract call.
 
 ## Phase 5 — finality and retention
 
@@ -68,7 +68,7 @@ Simulate, assemble, sign, submit, and poll to final `SUCCESS` or `FAILED`; `PEND
 
 - Run `cargo fmt --manifest-path stellar/Cargo.toml --check`, `cargo test --manifest-path stellar/Cargo.toml --locked`, and `stellar contract build --manifest-path stellar/Cargo.toml --package redevice-stellar --locked` before deployment. The contract CI job pins Rust 1.99.1 and Stellar CLI 28.1.0 and runs on `stellar/**` changes.
 - Run `npm ci`, `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --audit-level=high` at the repo root after frontend changes.
-- Repeat the successful Akif Testnet flow with Yhlas's separate funded account and an incognito/phone HTTPS QR read. Mocked tests and CLI reads do not prove his wallet or camera behavior.
+- Test open registration on the new contract with Yhlas's funded account, then check an incognito/phone HTTPS QR read. Mocked tests and CLI reads do not prove wallet or camera behavior.
 - Defer evidence uploads, payments, passkeys, historical Sui import, generic multichain abstractions, and production indexing until the core slice passes.
 
 Current Stellar tooling behavior must be checked against [Stellar contract documentation](https://developers.stellar.org/docs/build/smart-contracts), [Stellar CLI documentation](https://developers.stellar.org/docs/tools/cli), and [state archival documentation](https://developers.stellar.org/docs/build/guides/archival) before each implementation step.

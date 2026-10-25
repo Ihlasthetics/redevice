@@ -22,8 +22,8 @@ describe("Stellar browser without a deployment", () => {
       screen.getByRole("button", { name: "Register on Stellar" }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Attest on Stellar" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Attest on Stellar" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(/Live Stellar Testnet · device/),
     ).not.toBeInTheDocument();

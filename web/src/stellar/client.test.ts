@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Networks, StrKey, contract, rpc } from "@stellar/stellar-sdk";
 import {
   connectWallet,
+  getConnectedWallet,
   deviceExplorerUrl,
   parsePassportPath,
   passportPath,
@@ -13,6 +14,8 @@ import {
 const wallet = vi.hoisted(() => ({
   requestAccess: vi.fn(),
   getNetwork: vi.fn(),
+  getAddress: vi.fn(),
+  isAllowed: vi.fn(),
   signTransaction: vi.fn(),
 }));
 vi.mock("@stellar/freighter-api", () => wallet);
@@ -27,9 +30,21 @@ beforeEach(() => {
     network: "TESTNET",
     networkPassphrase: Networks.TESTNET,
   });
+  wallet.getAddress.mockResolvedValue({ address: account });
+  wallet.isAllowed.mockResolvedValue({ isAllowed: true });
 });
 
 describe("Stellar public identity", () => {
+  it("requires the exact five digit ID in the new contract mode", async () => {
+    vi.stubEnv("VITE_FIVE_DIGIT_IDS", "true");
+    vi.resetModules();
+    const { parseDeviceId } = await import("./client");
+    expect(parseDeviceId("58342")).toBe("58342");
+    expect(() => parseDeviceId("1")).toThrow("exactly five digits");
+    expect(() => parseDeviceId("09999")).toThrow("exactly five digits");
+    vi.unstubAllEnvs();
+  });
+
   it("accepts a checksummed contract and canonical decimal device ID", () => {
     expect(requireContractId(contractId)).toBe(contractId);
     const path = passportPath("42", contractId);
@@ -98,5 +113,50 @@ describe("Freighter connection", () => {
 
   it("accepts an authorized Testnet connection", async () => {
     await expect(connectWallet()).resolves.toBe(account);
+  });
+
+  it("restores an allowed wallet without requesting access", async () => {
+    await expect(getConnectedWallet()).resolves.toBe(account);
+    expect(wallet.requestAccess).not.toHaveBeenCalled();
+    wallet.isAllowed.mockResolvedValue({ isAllowed: false });
+    await expect(getConnectedWallet()).resolves.toBeNull();
+    expect(wallet.getAddress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Soroban role authorization", () => {
+  it("signs the admin auth entry before the transaction envelope", async () => {
+    vi.stubEnv("VITE_STELLAR_CONTRACT_ID", contractId);
+    vi.resetModules();
+    const { write } = await import("./client");
+    let authorized = false;
+    const signAuthEntries = vi.fn(async () => {
+      authorized = true;
+    });
+    const signAndSend = vi.fn(async () => {
+      expect(authorized).toBe(true);
+      return {
+        sendTransactionResponse: { hash: "a".repeat(64) },
+        getTransactionResponse: { status: "SUCCESS" },
+        result: new contract.Ok(undefined),
+      };
+    });
+    const from = vi.spyOn(contract.Client, "from").mockResolvedValue({
+      grant_role: vi.fn(async () => ({
+        isReadCall: false,
+        needsNonInvokerSigningBy: () => (authorized ? [] : [account]),
+        signAuthEntries,
+        signAndSend,
+      })),
+    } as never);
+    await write<void>(account, "grant_role", {
+      admin: account,
+      role: { tag: "Repairer" },
+      account,
+    });
+    expect(signAuthEntries).toHaveBeenCalledWith({ address: account });
+    expect(signAndSend).toHaveBeenCalledOnce();
+    from.mockRestore();
+    vi.unstubAllEnvs();
   });
 });

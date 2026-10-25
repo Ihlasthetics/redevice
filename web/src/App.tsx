@@ -4,9 +4,10 @@ import jsQR from "jsqr";
 import { createPassportPdf } from "./lib/passport-pdf";
 import {
   attestRepair,
-  connectWallet,
   CONTRACT_ID,
   deviceExplorerUrl,
+  FIVE_DIGIT_IDS,
+  getAdministrator,
   getDevice,
   getRepairs,
   hasRole,
@@ -20,6 +21,7 @@ import {
   type Repair,
   type Status,
 } from "./stellar/client";
+import { useWallet } from "./stellar/useWallet";
 
 const conditions: Status[] = ["Used", "Repaired", "Refurbished", "PartsOnly"];
 const label = (status: Status) =>
@@ -74,7 +76,7 @@ function Scanner({ onScan }: { onScan: (id: string) => void }) {
                 const url = new URL(code.data);
                 const origin = new URL(
                   publicPassportUrl(
-                    "1",
+                    FIVE_DIGIT_IDS ? "10000" : "1",
                     import.meta.env.VITE_PUBLIC_APP_ORIGIN,
                   ),
                 ).origin;
@@ -191,10 +193,13 @@ function PassportQr({ id, device }: { id: string; device: Device }) {
   );
 }
 
-function App() {
-  const [wallet, setWallet] = useState<string | null>(null);
-  const [registrar, setRegistrar] = useState(false);
+type View = "auto" | "register" | "repairer";
+
+function App({ view = "auto" }: { view?: View }) {
+  const { wallet, connect: connectFreighter } = useWallet();
   const [repairer, setRepairer] = useState(false);
+  const [roleChecked, setRoleChecked] = useState(false);
+  const [administrator, setAdministrator] = useState("");
   const [lookup, setLookup] = useState("");
   const [id, setId] = useState<string | null>(null);
   const [device, setDevice] = useState<Device | null>(null);
@@ -248,7 +253,8 @@ function App() {
       return;
     }
     try {
-      if (window.location.pathname === "/") return;
+      if (["/", "/register", "/repairer"].includes(window.location.pathname))
+        return;
       const route = parsePassportPath(window.location.pathname);
       if (!route || route.contractId !== CONTRACT_ID)
         throw new Error("Invalid Stellar passport link for this contract.");
@@ -260,28 +266,71 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void getAdministrator()
+      .then((admin) => {
+        if (active) setAdministrator(admin);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!wallet) {
+      setRepairer(false);
+      setRoleChecked(false);
+      return;
+    }
+    let active = true;
+    let pending = false;
+    setRepairer(false);
+    setRoleChecked(false);
+    async function refreshRole() {
+      if (pending) return;
+      pending = true;
+      try {
+        const role = await hasRole("Repairer", wallet!);
+        if (active) {
+          setRepairer(role);
+          setRoleChecked(true);
+        }
+      } catch (cause) {
+        if (active) {
+          setRepairer(false);
+          setRoleChecked(true);
+          setError(
+            `Repair authorization could not be checked: ${message(cause)}`,
+          );
+        }
+      } finally {
+        pending = false;
+      }
+    }
+    void refreshRole();
+    const interval = window.setInterval(() => void refreshRole(), 15000);
+    window.addEventListener("focus", refreshRole);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshRole);
+    };
+  }, [wallet]);
+
   async function connect() {
     setError("");
     try {
-      const account = await connectWallet();
-      setWallet(account);
-      const [canRegister, canRepair] = await Promise.all([
-        hasRole("Registrar", account),
-        hasRole("Repairer", account),
-      ]);
-      setRegistrar(canRegister);
-      setRepairer(canRepair);
+      await connectFreighter();
     } catch (cause) {
-      setWallet(null);
-      setRegistrar(false);
-      setRepairer(false);
       setError(message(cause));
     }
   }
 
   async function submitRegistration(event: FormEvent) {
     event.preventDefault();
-    if (!wallet || !registrar || busy) return;
+    if (!wallet || busy) return;
     setBusy(true);
     setError("");
     setNotice("Simulating registration; approve in Freighter when prompted.");
@@ -314,7 +363,7 @@ function App() {
 
   async function submitRepair(event: FormEvent) {
     event.preventDefault();
-    if (!wallet || !repairer || !id || busy) return;
+    if (!wallet || !repairer || view === "register" || !id || busy) return;
     setBusy(true);
     setError("");
     setNotice("Simulating repair; approve in Freighter when prompted.");
@@ -350,6 +399,7 @@ function App() {
     }
   }
 
+  const showRepair = repairer && view !== "register";
   const transactionHash = `${notice} ${error}`.match(/[0-9a-f]{64}/i)?.[0];
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -361,6 +411,36 @@ function App() {
           <span className="text-xs font-semibold uppercase tracking-widest text-brand">
             Stellar Testnet
           </span>
+          <nav className="flex items-center gap-3 text-sm font-semibold">
+            <a
+              href="/register"
+              className={
+                view === "register" ? "text-brand" : "text-muted hover:text-ink"
+              }
+            >
+              Register
+            </a>
+            {repairer && (
+              <a
+                href="/repairer"
+                className={
+                  view === "repairer"
+                    ? "text-brand"
+                    : "text-muted hover:text-ink"
+                }
+              >
+                Repairer
+              </a>
+            )}
+          </nav>
+          {wallet && wallet === administrator && (
+            <a
+              href="/admin"
+              className="text-sm font-semibold text-brand underline"
+            >
+              Admin
+            </a>
+          )}
           <button
             className="rounded-xl bg-ink px-4 py-2 text-white"
             disabled={!configured || busy}
@@ -378,10 +458,20 @@ function App() {
             Verifiable device passports
           </h1>
           <p className="mt-2 text-muted">
-            Public records on Stellar Testnet. Registration and repairs require
-            an authorized wallet.
+            Public records on Stellar Testnet. Registration needs a connected
+            wallet; repairs require an authorized repairer.
           </p>
         </div>
+        {view === "repairer" && !showRepair && (
+          <p
+            role="status"
+            className="rounded-xl border border-line bg-surface p-4 text-sm"
+          >
+            {wallet && !roleChecked
+              ? "Checking Repairer authorization…"
+              : "Repairer access is required for attestations. You can still find passports and register devices here."}
+          </p>
+        )}
         {!configured && (
           <div
             role="alert"
@@ -422,7 +512,10 @@ function App() {
             <input
               className="mt-4 w-full rounded-xl border border-line p-3"
               inputMode="numeric"
-              placeholder="Device ID, e.g. 1"
+              placeholder={
+                FIVE_DIGIT_IDS ? "Five digit device ID" : "Device ID, e.g. 1"
+              }
+              maxLength={FIVE_DIGIT_IDS ? 5 : 20}
               value={lookup}
               onChange={(event) => setLookup(event.target.value)}
             />
@@ -458,7 +551,7 @@ function App() {
                   <dd>{date(device.registered_at)}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted">Registrar</dt>
+                  <dt className="text-muted">Registered by</dt>
                   <dd className="break-all font-mono text-xs">
                     {device.registrar}
                   </dd>
@@ -527,24 +620,22 @@ function App() {
             <PassportQr id={id} device={device} />
           </section>
         )}
-        <section className="grid gap-5 lg:grid-cols-2">
+        <section
+          className={`grid gap-5 ${showRepair ? "lg:grid-cols-2" : "max-w-xl"}`}
+        >
           <form
             onSubmit={(event) => void submitRegistration(event)}
             className="grid content-start gap-3 rounded-2xl border border-line bg-surface p-5"
           >
             <h2 className="text-xl font-semibold">Register a device</h2>
             <p className="text-sm text-muted">
-              Registrar role required. The full serial stays in this browser;
-              only its hash is sent on-chain.
+              Connect a Testnet wallet to register. The full serial stays in
+              this browser; only its hash is sent on-chain. Registration is a
+              wallet-signed claim, not independent proof of ownership.
             </p>
             {!wallet && (
               <p className="text-sm text-amber-800">
-                Connect Freighter to check your role.
-              </p>
-            )}
-            {wallet && !registrar && (
-              <p className="text-sm text-amber-800">
-                This account has no Registrar role.
+                Connect Freighter to register a device.
               </p>
             )}
             <input
@@ -606,78 +697,82 @@ function App() {
               <option>Refurbished</option>
             </select>
             <button
-              disabled={!configured || !registrar || busy}
+              disabled={!configured || !wallet || busy}
               className="rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
             >
               Register on Stellar
             </button>
           </form>
-          <form
-            onSubmit={(event) => void submitRepair(event)}
-            className="grid content-start gap-3 rounded-2xl border border-line bg-surface p-5"
-          >
-            <h2 className="text-xl font-semibold">Attest a repair</h2>
-            <p className="text-sm text-muted">
-              Repairer role and a loaded live device required. Notes are public
-              on-chain.
-            </p>
-            {wallet && !repairer && (
-              <p className="text-sm text-amber-800">
-                This account has no Repairer role.
+          {showRepair && (
+            <form
+              onSubmit={(event) => void submitRepair(event)}
+              className="grid content-start gap-3 rounded-2xl border border-line bg-surface p-5"
+            >
+              <h2 className="text-xl font-semibold">Attest a repair</h2>
+              <p className="text-sm text-muted">
+                Repairer role and a loaded live device required. Notes are
+                public on-chain.
               </p>
-            )}
-            <input
-              required
-              maxLength={64}
-              className="rounded-xl border border-line p-3"
-              placeholder="Repair type"
-              value={repairType}
-              onChange={(event) => setRepairType(event.target.value)}
-            />
-            <textarea
-              required
-              maxLength={500}
-              className="min-h-28 rounded-xl border border-line p-3"
-              placeholder="Public service notes"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-            />
-            <select
-              className="rounded-xl border border-line p-3"
-              value={nextStatus}
-              onChange={(event) => setNextStatus(event.target.value as Status)}
-            >
-              {conditions.map((condition) => (
-                <option key={condition} value={condition}>
-                  {label(condition)}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              className="rounded-xl border border-line p-3"
-              placeholder="Battery health % (optional)"
-              value={battery}
-              onChange={(event) => setBattery(event.target.value)}
-            />
-            <label className="text-xs text-muted">
-              Claimed service time (optional)
+              {wallet && !repairer && (
+                <p className="text-sm text-amber-800">
+                  This account has no Repairer role.
+                </p>
+              )}
               <input
-                type="datetime-local"
-                className="mt-1 w-full rounded-xl border border-line p-3"
-                value={serviceDate}
-                onChange={(event) => setServiceDate(event.target.value)}
+                required
+                maxLength={64}
+                className="rounded-xl border border-line p-3"
+                placeholder="Repair type"
+                value={repairType}
+                onChange={(event) => setRepairType(event.target.value)}
               />
-            </label>
-            <button
-              disabled={!configured || !repairer || !device || busy}
-              className="rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
-            >
-              Attest on Stellar
-            </button>
-          </form>
+              <textarea
+                required
+                maxLength={500}
+                className="min-h-28 rounded-xl border border-line p-3"
+                placeholder="Public service notes"
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+              />
+              <select
+                className="rounded-xl border border-line p-3"
+                value={nextStatus}
+                onChange={(event) =>
+                  setNextStatus(event.target.value as Status)
+                }
+              >
+                {conditions.map((condition) => (
+                  <option key={condition} value={condition}>
+                    {label(condition)}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                className="rounded-xl border border-line p-3"
+                placeholder="Battery health % (optional)"
+                value={battery}
+                onChange={(event) => setBattery(event.target.value)}
+              />
+              <label className="text-xs text-muted">
+                Claimed service time (optional)
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded-xl border border-line p-3"
+                  value={serviceDate}
+                  onChange={(event) => setServiceDate(event.target.value)}
+                />
+              </label>
+              <button
+                disabled={!configured || !repairer || !device || busy}
+                className="rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
+              >
+                Attest on Stellar
+              </button>
+            </form>
+          )}
         </section>
         {transactionHash && (
           <a

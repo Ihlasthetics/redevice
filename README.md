@@ -1,47 +1,51 @@
 # ReDevice
 
-ReDevice gives refurbished electronics a public passport and repair history on Stellar Testnet. Authorized registrars create device records, authorized repairers append service attestations, and anyone can read a passport through a link or QR code without connecting a wallet. An on-chain attestation proves which account submitted a record and when; it does not independently prove that physical work occurred.
+ReDevice gives refurbished electronics a public passport and repair history on Stellar Testnet. Connected wallets create device records, authorized repairers append service attestations, and anyone can read a passport through a link or QR code without connecting a wallet. An on-chain attestation proves which account submitted a record and when; it does not independently prove that physical work occurred.
 
 ## Current status — 25 October 2026
 
 | Item                  | Status                                                             |
 | --------------------- | ------------------------------------------------------------------ |
-| Public app            | [redevice-delta.vercel.app](https://redevice-delta.vercel.app)     |
+| Public app            | [redevice-six.vercel.app](https://redevice-six.vercel.app)         |
 | Network               | Stellar Testnet                                                    |
-| Contract              | `CDSP64KAEVFZ5QU3U2AMTNFWWF3CHEXRCFBSXWDESF6QSR3SHU2CWZCT`         |
-| Reviewed WASM SHA-256 | `77bb782f87eee60ad687fa78cf31c4b2e221e4a12469ce657438a1d3ef2d22d0` |
-| Administrator         | `GD4EBGIWGRWV53KWC5UVLCKDIXTGLFDJKRBEATB7B3SUXJWNWT2KYLJT`         |
+| Contract              | `CCHXDDGMOZNABGIYGBOIWCFHD3RECIKI2UWJKMOGRBCSSIL6YACCX6WJ`         |
+| Reviewed WASM SHA-256 | `538b6343ce351890bb53fcb27b6f8c1075b5af2eb9dead3debf06cc0b9004d70` |
+| Administrator         | `GBYKDBAWYNIVU24MVH2ENOYFLSU7LXRNHFWJ7WOPF3Q76C3MDV5SWCLD`         |
 
-The contract and both roles are live. Akif registered a device and attested a repair through the local browser. Public Testnet reads confirm device **1** and its **one repair record**. The hosted homepage and direct passport route respond over HTTPS. Yhlas's independent wallet and phone QR flow still need testing.
+This contract accepts registration from any connected Testnet wallet. Repair attestations still require an administrator-granted Repairer role. It currently contains device **1** with one repair. The earlier contract (`CDSP64KAEVFZ5QU3U2AMTNFWWF3CHEXRCFBSXWDESF6QSR3SHU2CWZCT`) also retains its own device **1** and repair history at [the earlier app](https://redevice-delta.vercel.app); its registration rule is unchanged.
 
-The current Vercel deployment came from the local `hackathon/stellar-migration-akif` checkout. It is not connected to the GitHub repository, and these migration changes have not been pushed. Later code changes require another deployment to update the hosted app.
+The personal Vercel project `yhlas/redevice` is deployed from this checkout. It is not connected to GitHub; later code changes require another deployment.
 
 ## What works
 
 - Freighter connects on Testnet and checks the connected account's on-chain roles.
-- A registrar can register a device. The browser hashes the normalized full serial; the contract stores its commitment and rejects duplicates. The full serial is not submitted. A serial commitment can still be guessed from likely serials, so it is not anonymous.
+- Any connected Testnet wallet can register a device. The browser hashes the normalized full serial; the contract stores its commitment and rejects duplicates. The full serial is not submitted. A serial commitment can still be guessed from likely serials, so it is not anonymous. Registration is a wallet-signed claim, not proof of ownership.
 - A repairer can append a repair with public notes, a lifecycle change, optional battery health, and an optional claimed service time. The contract records its own ledger timestamp separately.
 - Anyone can read a passport and paged repair history without a wallet. The app provides passport URLs, QR codes, camera scanning, PDF export, and explorer links.
 - Registration and repair requests have stable request IDs, and the browser waits for final transaction status. The contract has role revocation, input limits, lifecycle rules, and storage TTL extension.
 
 ### Roles today
 
-| Role          | On-chain permission                                    |
-| ------------- | ------------------------------------------------------ |
-| Administrator | Grant, revoke, and replace Registrar or Repairer roles |
-| Registrar     | Register devices                                       |
-| Repairer      | Attest repairs on registered devices                   |
-| No role       | Read public records                                    |
+| Role          | On-chain permission                       |
+| ------------- | ----------------------------------------- |
+| Administrator | Grant, revoke, and replace Repairer roles |
+| Repairer      | Attest repairs on registered devices      |
+| No role       | Register devices and read public records  |
 
-The contract requires the actor's signature **and** active role for every write; disabling a browser button is only a user interface aid. Akif's account is currently Administrator, Registrar, and Repairer because it was used for the first end-to-end test. The roles can be assigned to separate accounts without changing the contract. The `/deploy` page can grant roles to its connected administrator account, but a general admin screen for other addresses and revocation is still needed. Any authorized repairer can currently attest a repair on any registered device; there is no per-device assignment.
+The contract requires the actor's signature for registration and both a signature and active Repairer role for repair attestations. The connected Yhlas wallet is the new contract's administrator. The dedicated `/admin` screen checks, grants, and revokes Repairer access for a Testnet wallet address after verifying the connected administrator wallet. Freighter prompts for the Soroban authorization signature and the transaction signature. Any authorized repairer can currently attest a repair on any registered device; there is no per-device assignment. The legacy Registrar enum remains in the contract interface but is not checked for registration.
+
+The `/register` screen shows passport lookup and device registration. The `/repairer` screen includes those actions and adds repair attestation only while the connected wallet has an active Repairer role. A wallet without that role never sees the repair form, even when opening `/repairer` directly. The app restores an already authorized Freighter Testnet wallet when navigating between screens.
+
+A revised contract that draws distinct five digit IDs is built and uploaded on Testnet with WASM SHA-256 `d5d3a7c0e9a92af5ff41b949ad28745bb9572143243076e4d11e91df456914eb`. It is **not yet the production contract**. The current contract still assigns sequential IDs and contains device 1 with one repair. The new code requires a new contract instance because the current contract has no upgrade function. The `/deploy` page can read back the uploaded WASM before the administrator signs instance deployment. Five digit IDs are public and can be guessed; they are not access secrets.
 
 ## Test the hosted app
 
-1. Open [the app](https://redevice-delta.vercel.app) and read device ID `1` without connecting a wallet.
-2. To test a write, install Freighter, select **Test Net**, connect an account that has the relevant role, and approve the transaction in Freighter. Only Akif's account currently has both write roles.
-3. Open a passport link or QR code on a second device to check the public experience. Hosted links use the HTTPS Vercel origin; a localhost QR link is not reachable from another device.
+1. Open [the app](https://redevice-six.vercel.app) and look up device `1` on the current contract.
+2. Open `/register` to find a passport or register a device. Install Freighter, select **Test Net**, connect and fund a Testnet account, then approve the registration transaction. No Registrar role is needed.
+3. To authorize a repairer, open `/admin`, connect the contract administrator wallet, enter the repairer's `G…` address, and select **Grant Repairer**. Approve both Freighter prompts and wait for the confirmed transaction. The repairer then opens `/repairer` to attest a repair, or use passport lookup and registration.
+4. Open a passport link or QR code on a second device to check the public experience. Hosted links use the HTTPS Vercel origin; a localhost QR link is not reachable from another device.
 
-Test data and repair notes are public on Testnet. Do not put private information in them. Yhlas only needs to share his **public `G...` address** to receive a role; never share a recovery phrase or private key.
+Test data and repair notes are public on Testnet. Do not put private information in them. A repairer only needs to share a **public `G...` address** to receive a role; never share a recovery phrase or private key.
 
 ## Run locally
 
@@ -55,7 +59,7 @@ cp web/.env.example web/.env.local
 Set the following public value in `web/.env.local`, then start Vite:
 
 ```dotenv
-VITE_STELLAR_CONTRACT_ID=CDSP64KAEVFZ5QU3U2AMTNFWWF3CHEXRCFBSXWDESF6QSR3SHU2CWZCT
+VITE_STELLAR_CONTRACT_ID=CCHXDDGMOZNABGIYGBOIWCFHD3RECIKI2UWJKMOGRBCSSIL6YACCX6WJ
 ```
 
 ```sh
@@ -74,7 +78,7 @@ npm run test:fee-bump
 npm run build
 ```
 
-The latest local checks passed: **26 browser tests**, **1 fee-bump construction test**, and **12 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
+The latest local checks passed: **35 browser tests** and **13 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
 
 ```sh
 cargo fmt --manifest-path stellar/Cargo.toml --check
@@ -82,13 +86,13 @@ cargo test --manifest-path stellar/Cargo.toml --locked
 stellar contract build --manifest-path stellar/Cargo.toml --package redevice-stellar --locked
 ```
 
-Vercel builds from the repository root with [vercel.json](vercel.json). Set `VITE_STELLAR_CONTRACT_ID` as a build environment variable for each CLI deployment. The [ignore file](.vercelignore) excludes local environment files and contract build artifacts. The optional `/deploy` page handles a reviewed WASM upload, fee-bump signing, instance deployment, and initial role grants. The current contract is already deployed: use **Check existing upload** before any repeat upload. Stellar Lab's ordinary upload form could not represent the original WASM upload fee; the fee-bump flow succeeded on Testnet.
+Vercel builds from the repository root with [vercel.json](vercel.json). The personal Vercel project's production `VITE_STELLAR_CONTRACT_ID` points to the current sequential-ID contract. The [ignore file](.vercelignore) excludes local environment files and contract build artifacts. The optional `/deploy` page handles a reviewed WASM upload, fee-bump signing, instance deployment, and a Repairer role grant. The five digit WASM is already uploaded: use **Check existing upload** before any repeat upload. Set `VITE_FIVE_DIGIT_IDS=true` only when production points to the new contract.
 
 ## Remaining work
 
-- Give Yhlas's Testnet account the Repairer role, remove that role from Akif when the separate-account test is ready, and add admin controls for managing other public addresses.
-- Test Yhlas's wallet on the hosted app, an unrelated account's rejected writes, role revocation, and phone QR scanning.
+- Register a device from an account without roles, and test repair attestations from a separately authorized real repairer.
+- Test unauthorized and revoked repair writes and phone QR scanning.
 - Exercise interrupted transaction recovery and archived-entry restoration on Testnet.
-- Record public upload, deployment, role, registration, and repair transaction hashes in the deployment record. Push and review the migration branch when the team is ready; Vercel is not yet linked to GitHub.
+- Record registration and repair transaction hashes in the deployment record. Vercel is not yet linked to GitHub.
 
 See [the Stellar integration plan](docs/stellar_integration.md) for the schema, test gates, and remaining migration details. The earlier Sui prototype remains in Git history; its records are not presented as Stellar records.

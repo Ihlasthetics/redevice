@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { contract } from "@stellar/stellar-sdk";
 import { IndexedDBStorage, SmartAccountKit } from "smart-account-kit";
 import AppShell from "./components/AppShell";
+import { allowedRepairStatuses } from "./stellar/repair-transitions";
 import {
   CONTRACT_ID,
   FIVE_DIGIT_IDS,
@@ -11,8 +12,10 @@ import {
   getRepairs,
   hasRole,
   NETWORK,
+  parseDeviceId,
   RPC_URL,
   transactionExplorerUrl,
+  type Device,
   type Status,
 } from "./stellar/client";
 
@@ -53,11 +56,19 @@ export default function PasskeySpike() {
   const [repairType, setRepairType] = useState("Screen replacement");
   const [notes, setNotes] = useState("Testnet passkey repair attestation");
   const [status, setStatus] = useState<Status>("Repaired");
+  const [device, setDevice] = useState<Device | null>(null);
+  const [deviceLookupError, setDeviceLookupError] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [hash, setHash] = useState("");
   const [testToken, setTestToken] = useState("");
   const [testUnlocked, setTestUnlocked] = useState(import.meta.env.DEV);
+  const availableStatuses = device
+    ? allowedRepairStatuses(device.status.tag)
+    : [];
+  const selectedStatus = availableStatuses.includes(status)
+    ? status
+    : undefined;
 
   useEffect(() => {
     void kit.connectWallet().then(
@@ -65,6 +76,35 @@ export default function PasskeySpike() {
       () => setAccount(""),
     );
   }, []);
+
+  useEffect(() => {
+    setDevice(null);
+    setDeviceLookupError("");
+    if (!deviceId) return;
+    try {
+      parseDeviceId(deviceId);
+    } catch (error) {
+      setDeviceLookupError(message(error));
+      return;
+    }
+    let active = true;
+    const timeout = window.setTimeout(() => {
+      void getDevice(deviceId).then(
+        (found) => {
+          if (!active) return;
+          if (found) setDevice(found);
+          else setDeviceLookupError(`Device ${deviceId} was not found.`);
+        },
+        (error) => {
+          if (active) setDeviceLookupError(message(error));
+        },
+      );
+    }, 350);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [deviceId]);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -120,15 +160,23 @@ export default function PasskeySpike() {
         throw new Error(
           `Passkey account ${account} does not have Repairer access on this contract. Ask the administrator to grant this exact C-address at /admin, then retry.`,
         );
-      const device = await getDevice(deviceId);
-      if (!device) throw new Error(`Device ${deviceId} was not found.`);
+      if (!device) throw new Error(`Load device ${deviceId} before attesting.`);
+      if (!selectedStatus)
+        throw new Error("This device cannot move to another condition.");
+      const latestDevice = await getDevice(deviceId);
+      if (!latestDevice || latestDevice.status.tag !== device.status.tag) {
+        setDevice(latestDevice);
+        throw new Error(
+          "Device condition changed. Review the current condition before attesting.",
+        );
+      }
       if (
         !window.confirm(
-          `Approve this public Testnet repair?\nDevice: ${deviceId}\nType: ${repairType}\nNotes: ${notes}\nNew status: ${status}`,
+          `Approve this public Testnet repair?\nDevice: ${deviceId}\nCurrent condition: ${device.status.tag}\nType: ${repairType}\nNotes: ${notes}\nNew condition: ${selectedStatus}`,
         )
       )
         return;
-      const key = `redevice:passkey-spike:${CONTRACT_ID}:${account}:${deviceId}:${repairType}:${notes}:${status}`;
+      const key = `redevice:passkey-spike:${CONTRACT_ID}:${account}:${deviceId}:${repairType}:${notes}:${selectedStatus}`;
       let requestId = localStorage.getItem(key);
       if (!requestId) {
         requestId = Array.from(
@@ -151,7 +199,7 @@ export default function PasskeySpike() {
         device_id: BigInt(deviceId),
         repair_type: repairType.trim(),
         notes: notes.trim(),
-        next_status: { tag: status },
+        next_status: { tag: selectedStatus },
         battery_health: undefined,
         claimed_service_time: undefined,
       });
@@ -160,6 +208,7 @@ export default function PasskeySpike() {
       if (!result.success) throw new Error(message(result.error));
       setHash(result.hash);
       const refreshed = await getDevice(deviceId);
+      setDevice(refreshed);
       const repairs = refreshed
         ? await getRepairs(deviceId, refreshed.repair_count)
         : [];
@@ -293,10 +342,25 @@ export default function PasskeySpike() {
                 }
                 inputMode="numeric"
                 value={deviceId}
-                onChange={(event) => setDeviceId(event.target.value)}
+                onChange={(event) => {
+                  setDeviceId(event.target.value);
+                  setDevice(null);
+                  setDeviceLookupError("");
+                }}
+                disabled={busy}
                 className="border p-3"
               />
             </label>
+            {device && (
+              <p className="text-sm text-muted">
+                Current condition: <strong>{device.status.tag}</strong> ·{" "}
+                {device.repair_count} repair record
+                {device.repair_count === 1 ? "" : "s"}
+              </p>
+            )}
+            {deviceLookupError && (
+              <p className="text-sm text-amber-800">{deviceLookupError}</p>
+            )}
             <label className="rd-field">
               Repair type
               <input
@@ -316,17 +380,31 @@ export default function PasskeySpike() {
             <label className="rd-field">
               New condition
               <select
-                value={status}
+                value={selectedStatus ?? ""}
                 onChange={(event) => setStatus(event.target.value as Status)}
                 className="border p-3"
+                disabled={!device || availableStatuses.length === 0}
               >
-                <option>Repaired</option>
-                <option>Refurbished</option>
-                <option>PartsOnly</option>
+                {!selectedStatus && (
+                  <option value="" disabled>
+                    Choose next condition
+                  </option>
+                )}
+                {availableStatuses.map((next) => (
+                  <option key={next} value={next}>
+                    {next === "PartsOnly" ? "Parts only" : next}
+                  </option>
+                ))}
               </select>
             </label>
+            {device && availableStatuses.length === 0 && (
+              <p className="text-sm text-amber-800">
+                Parts only is the final condition. No further repair attestation
+                is allowed.
+              </p>
+            )}
             <button
-              disabled={busy || !account || !testUnlocked}
+              disabled={busy || !account || !testUnlocked || !selectedStatus}
               className="min-h-11 rounded-lg bg-ink px-5 text-sm font-semibold text-white disabled:opacity-50"
             >
               Approve repair with passkey

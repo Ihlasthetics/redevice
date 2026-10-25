@@ -23,13 +23,8 @@ import {
   type Status,
 } from "./stellar/client";
 import { useWallet } from "./stellar/useWallet";
+import { allowedRepairStatuses } from "./stellar/repair-transitions";
 
-const repairTransitions: Record<Status, Status[]> = {
-  Used: ["Repaired", "Refurbished", "PartsOnly"],
-  Repaired: ["Refurbished", "PartsOnly"],
-  Refurbished: ["Repaired", "PartsOnly"],
-  PartsOnly: [],
-};
 const label = (status: Status) =>
   status === "PartsOnly" ? "Parts only" : status;
 const message = (error: unknown) =>
@@ -246,10 +241,12 @@ function App({ view = "auto" }: { view?: View }) {
   const [nextStatus, setNextStatus] = useState<Status>("Repaired");
   const [battery, setBattery] = useState("");
   const [serviceDate, setServiceDate] = useState("");
-  const availableStatuses = device ? repairTransitions[device.status.tag] : [];
+  const availableStatuses = device
+    ? allowedRepairStatuses(device.status.tag)
+    : [];
   const selectedStatus = availableStatuses.includes(nextStatus)
     ? nextStatus
-    : availableStatuses[0];
+    : undefined;
 
   async function load(nextId: string) {
     setBusy(true);
@@ -803,6 +800,11 @@ function App({ view = "auto" }: { view?: View }) {
                     setNextStatus(event.target.value as Status)
                   }
                 >
+                  {!selectedStatus && (
+                    <option value="" disabled>
+                      Choose next condition
+                    </option>
+                  )}
                   {availableStatuses.map((condition) => (
                     <option key={condition} value={condition}>
                       {label(condition)}

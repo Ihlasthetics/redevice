@@ -24,7 +24,12 @@ import {
 } from "./stellar/client";
 import { useWallet } from "./stellar/useWallet";
 
-const conditions: Status[] = ["Used", "Repaired", "Refurbished", "PartsOnly"];
+const repairTransitions: Record<Status, Status[]> = {
+  Used: ["Repaired", "Refurbished", "PartsOnly"],
+  Repaired: ["Refurbished", "PartsOnly"],
+  Refurbished: ["Repaired", "PartsOnly"],
+  PartsOnly: [],
+};
 const label = (status: Status) =>
   status === "PartsOnly" ? "Parts only" : status;
 const message = (error: unknown) =>
@@ -241,6 +246,10 @@ function App({ view = "auto" }: { view?: View }) {
   const [nextStatus, setNextStatus] = useState<Status>("Repaired");
   const [battery, setBattery] = useState("");
   const [serviceDate, setServiceDate] = useState("");
+  const availableStatuses = device ? repairTransitions[device.status.tag] : [];
+  const selectedStatus = availableStatuses.includes(nextStatus)
+    ? nextStatus
+    : availableStatuses[0];
 
   async function load(nextId: string) {
     setBusy(true);
@@ -367,13 +376,23 @@ function App({ view = "auto" }: { view?: View }) {
 
   async function submitRepair(event: FormEvent) {
     event.preventDefault();
-    if (!wallet || !repairer || view === "register" || !id || busy) return;
+    if (!wallet || !repairer || view === "register" || !id || !device || busy)
+      return;
     setBusy(true);
     setError("");
     setNotice("Simulating repair; approve in Freighter when prompted.");
     try {
       if (!repairType.trim() || !notes.trim())
         throw new Error("Repair type and public notes are required.");
+      if (!selectedStatus)
+        throw new Error("This device cannot move to another condition.");
+      const latestDevice = await getDevice(id);
+      if (!latestDevice || latestDevice.status.tag !== device.status.tag) {
+        if (latestDevice) setDevice(latestDevice);
+        throw new Error(
+          "Device condition changed. Review the new condition before attesting.",
+        );
+      }
       const health = battery === "" ? undefined : Number(battery);
       if (
         health !== undefined &&
@@ -387,7 +406,7 @@ function App({ view = "auto" }: { view?: View }) {
         deviceId: id,
         repairType,
         notes,
-        status: nextStatus,
+        status: selectedStatus,
         batteryHealth: health,
         claimedTime,
       });
@@ -779,18 +798,24 @@ function App({ view = "auto" }: { view?: View }) {
                 New condition
                 <select
                   className="border p-3"
-                  value={nextStatus}
+                  value={selectedStatus ?? ""}
                   onChange={(event) =>
                     setNextStatus(event.target.value as Status)
                   }
                 >
-                  {conditions.map((condition) => (
+                  {availableStatuses.map((condition) => (
                     <option key={condition} value={condition}>
                       {label(condition)}
                     </option>
                   ))}
                 </select>
               </label>
+              {device && availableStatuses.length === 0 && (
+                <p className="text-sm text-amber-800">
+                  Parts only is the final condition. No further repair
+                  attestation is allowed.
+                </p>
+              )}
               <label className="rd-field">
                 Battery health %{" "}
                 <span className="font-normal text-muted">(optional)</span>
@@ -814,7 +839,7 @@ function App({ view = "auto" }: { view?: View }) {
                 />
               </label>
               <button
-                disabled={!configured || !repairer || !device || busy}
+                disabled={!configured || !repairer || !selectedStatus || busy}
                 className="w-fit rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Attest on Stellar

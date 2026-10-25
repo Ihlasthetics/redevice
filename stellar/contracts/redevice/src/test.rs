@@ -111,6 +111,42 @@ fn registrations_receive_distinct_five_digit_ids() {
 }
 
 #[test]
+fn request_id_determines_device_id_and_collision_probe() {
+    let (env, contract_id, _admin, registrar) = setup();
+    let client = ReDeviceClient::new(&env, &contract_id);
+    let first_request = [1u8; 32];
+    let mut second_request = first_request;
+    second_request[8] = 2;
+    let first = client.register_device(
+        &registrar,
+        &BytesN::from_array(&env, &first_request),
+        &BytesN::from_array(&env, &[3; 32]),
+        &String::from_str(&env, "lenovo"),
+        &String::from_str(&env, "thinkpad-t14"),
+        &String::from_str(&env, "Lenovo"),
+        &String::from_str(&env, "ThinkPad T14"),
+        &String::from_str(&env, "***AB9"),
+        &LifecycleStatus::Used,
+    );
+    let expected =
+        MIN_DEVICE_ID + (u64::from_be_bytes([1; 8]) % (MAX_DEVICE_ID - MIN_DEVICE_ID + 1));
+    assert_eq!(first, expected);
+    env.ledger().with_mut(|ledger| ledger.timestamp += 60);
+    let second = client.register_device(
+        &registrar,
+        &BytesN::from_array(&env, &second_request),
+        &BytesN::from_array(&env, &[4; 32]),
+        &String::from_str(&env, "lenovo"),
+        &String::from_str(&env, "thinkpad-t14"),
+        &String::from_str(&env, "Lenovo"),
+        &String::from_str(&env, "ThinkPad T14"),
+        &String::from_str(&env, "***CD8"),
+        &LifecycleStatus::Used,
+    );
+    assert_eq!(second, first + 1);
+}
+
+#[test]
 fn ungranted_and_revoked_registrars_can_register() {
     let (env, contract_id, admin, registrar) = setup();
     let client = ReDeviceClient::new(&env, &contract_id);

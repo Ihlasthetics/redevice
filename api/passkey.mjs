@@ -1,4 +1,6 @@
-import { ChannelsClient } from "@openzeppelin/relayer-plugin-channels";
+// The package root also loads its server plugin, whose CommonJS Stellar import
+// fails in Vercel's function runtime. This endpoint only needs the HTTP client.
+import { ChannelsClient } from "@openzeppelin/relayer-plugin-channels/dist/client/channels-client.js";
 import { Address, Networks, rpc, xdr } from "@stellar/stellar-sdk";
 import {
   authenticated,

@@ -18,7 +18,7 @@ import {
 
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const EXPECTED_WASM_SHA256 =
-  "d5d3a7c0e9a92af5ff41b949ad28745bb9572143243076e4d11e91df456914eb";
+  "583425b1943ce3656c5a0ada771911a7b4522151c799bc8cbc723b6fdd1a812e";
 const server = new rpc.Server(RPC_URL);
 
 export type UploadPreview = {

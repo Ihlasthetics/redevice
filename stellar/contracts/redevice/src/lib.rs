@@ -307,9 +307,15 @@ impl ReDevice {
         if env.storage().persistent().has(&serial_key) {
             return Err(ContractError::DuplicateDevice);
         }
+        // The browser supplies a cryptographically random request ID. Derive the
+        // device ID from it so simulation and submission access the same keys.
+        // Ledger PRNG output changes between those phases and breaks footprints.
+        let request_bytes = request_id.to_array();
+        let seed = u64::from_be_bytes(request_bytes[..8].try_into().unwrap());
+        let id_span = MAX_DEVICE_ID - MIN_DEVICE_ID + 1;
         let mut id = None;
-        for _ in 0..ID_DRAW_ATTEMPTS {
-            let candidate = env.prng().gen_range(MIN_DEVICE_ID..=MAX_DEVICE_ID);
+        for attempt in 0..ID_DRAW_ATTEMPTS {
+            let candidate = MIN_DEVICE_ID + (seed % id_span + u64::from(attempt)) % id_span;
             if !env.storage().persistent().has(&DataKey::Device(candidate)) {
                 id = Some(candidate);
                 break;

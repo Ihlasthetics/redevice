@@ -416,18 +416,14 @@ function App({ view = "auto" }: { view?: View }) {
             >
               Register
             </a>
-            {repairer && (
-              <a
-                href="/repairer"
-                className={
-                  view === "repairer"
-                    ? "text-brand"
-                    : "text-muted hover:text-ink"
-                }
-              >
-                Repairer
-              </a>
-            )}
+            <a
+              href="/repairer"
+              className={
+                view === "repairer" ? "text-brand" : "text-muted hover:text-ink"
+              }
+            >
+              Repairer
+            </a>
           </nav>
           {wallet && wallet === administrator && (
             <a
@@ -458,6 +454,15 @@ function App({ view = "auto" }: { view?: View }) {
             wallet; repairs require an authorized repairer.
           </p>
         </div>
+        {view === "repairer" &&
+          import.meta.env.VITE_PASSKEY_TESTING === "true" && (
+            <a
+              href="/passkey-spike"
+              className="w-fit rounded-xl bg-ink px-4 py-3 font-semibold text-white"
+            >
+              Continue with passkey
+            </a>
+          )}
         {view === "repairer" && !showRepair && (
           <p
             role="status"

@@ -365,6 +365,12 @@ export async function registerDevice(
     status: "Used" | "Refurbished";
   },
 ) {
+  if (
+    CONTRACT_ID === "CBT2G6GG5BYRV7DFCECIOVZXHAVH3UQWK2KSYUA7CXZY34H7TQ74N3OM"
+  )
+    throw new Error(
+      "Registration is paused on this Testnet contract because its random ID changes between simulation and submission. Deploy the corrected contract and update this Preview first.",
+    );
   const identity = normalizeSerialIdentity({
     manufacturerNamespace: fields.manufacturer,
     productNamespace: fields.product,

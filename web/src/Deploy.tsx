@@ -49,11 +49,21 @@ export default function Deploy() {
       </a>
       <h1 className="text-3xl font-bold">Testnet contract setup</h1>
       <p>
-        Use your Freighter Testnet account. The reviewed five digit ID WASM is
-        already uploaded to Testnet, so you can connect and select{" "}
-        <strong>Check existing upload</strong> below. Deploying an instance
-        requires wallet approval; new instances start without device records or
-        Repairer grants.
+        Use your Freighter Testnet account. The corrected five digit ID WASM
+        must be uploaded before deploying a new instance. Select the newly built
+        WASM below and review the upload fee. New instances start without device
+        records or Repairer grants.
+      </p>
+      <p>
+        <a
+          className="underline"
+          href="/contract/redevice_stellar.wasm"
+          download
+        >
+          Download the corrected WASM
+        </a>{" "}
+        (SHA-256:
+        583425b1943ce3656c5a0ada771911a7b4522151c799bc8cbc723b6fdd1a812e).
       </p>
 
       <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">

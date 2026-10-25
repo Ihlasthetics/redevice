@@ -8,11 +8,11 @@ ReDevice gives refurbished electronics a public passport and repair history on S
 | --------------------- | ------------------------------------------------------------------ |
 | Public app            | [redevice-six.vercel.app](https://redevice-six.vercel.app)         |
 | Network               | Stellar Testnet                                                    |
-| Contract              | `CCHXDDGMOZNABGIYGBOIWCFHD3RECIKI2UWJKMOGRBCSSIL6YACCX6WJ`         |
-| Reviewed WASM SHA-256 | `538b6343ce351890bb53fcb27b6f8c1075b5af2eb9dead3debf06cc0b9004d70` |
+| Contract              | `CBR76DY4ZIRCB2CK5A2V7CC4I4UF7SQ5ULUHT6HMP4ZWN3R32BWAOIQP`         |
+| Reviewed WASM SHA-256 | `583425b1943ce3656c5a0ada771911a7b4522151c799bc8cbc723b6fdd1a812e` |
 | Administrator         | `GBYKDBAWYNIVU24MVH2ENOYFLSU7LXRNHFWJ7WOPF3Q76C3MDV5SWCLD`         |
 
-This contract accepts registration from any connected Testnet wallet. Repair attestations still require an administrator-granted Repairer role. It currently contains device **1** with one repair. The earlier contract (`CDSP64KAEVFZ5QU3U2AMTNFWWF3CHEXRCFBSXWDESF6QSR3SHU2CWZCT`) also retains its own device **1** and repair history at [the earlier app](https://redevice-delta.vercel.app); its registration rule is unchanged.
+This contract accepts registration from any connected Testnet wallet and issues five digit device IDs. Repair attestations require an administrator-granted Repairer role. The previous sequential-ID contract (`CCHXDDGMOZNABGIYGBOIWCFHD3RECIKI2UWJKMOGRBCSSIL6YACCX6WJ`) retains its device **1** and repair history on Testnet; those records are not part of the current contract.
 
 The personal Vercel project `yhlas/redevice` is deployed from this checkout. It is not connected to GitHub; later code changes require another deployment.
 
@@ -36,16 +36,16 @@ The contract requires the actor's signature for registration and both a signatur
 
 The `/register` screen shows passport lookup and device registration. The `/repairer` screen includes those actions and adds repair attestation only while the connected wallet has an active Repairer role. A wallet without that role never sees the repair form, even when opening `/repairer` directly. The app restores an already authorized Freighter Testnet wallet when navigating between screens.
 
-A revised contract that draws distinct five digit IDs is built and uploaded on Testnet with WASM SHA-256 `d5d3a7c0e9a92af5ff41b949ad28745bb9572143243076e4d11e91df456914eb`. It is **not yet the production contract**. The current contract still assigns sequential IDs and contains device 1 with one repair. The new code requires a new contract instance because the current contract has no upgrade function. The `/deploy` page can read back the uploaded WASM before the administrator signs instance deployment. Five digit IDs are public and can be guessed; they are not access secrets.
+The single public address is [redevice-six.vercel.app](https://redevice-six.vercel.app). It currently points to the latest Vercel Preview deployment so the token-gated passkey sponsor can run without copying secrets into another environment. The old Preview alias was removed. Registration derives IDs from the browser's random request ID, so simulation and submission use the same storage key. The previous five-digit contract `CBT2G6GG5BYRV7DFCECIOVZXHAVH3UQWK2KSYUA7CXZY34H7TQ74N3OM` is broken; transaction `52ee226f9ffed287bf8cb9583f69a31e70eebf91fcbdaadec3f1f3edb501ee1a` failed because its PRNG chose a different key after simulation. Existing passports stay with their original contracts. Five-digit IDs are public and can be guessed; they are not access secrets.
 
 ## Test the hosted app
 
-1. Open [the app](https://redevice-six.vercel.app) and look up device `1` on the current contract.
+1. Open [the app](https://redevice-six.vercel.app) and register a device to receive a new five digit ID, or look up an existing ID on the current contract.
 2. Open `/register` to find a passport or register a device. Install Freighter, select **Test Net**, connect and fund a Testnet account, then approve the registration transaction. No Registrar role is needed.
-3. To authorize a repairer, open `/admin`, connect the contract administrator wallet, enter the repairer's `G…` address, and select **Grant Repairer**. Approve both Freighter prompts and wait for the confirmed transaction. The repairer then opens `/repairer` to attest a repair, or use passport lookup and registration.
+3. To authorize a repairer, open `/admin`, connect the contract administrator wallet, enter the repairer's `G…` or passkey `C…` address, and select **Grant Repairer**. Approve both Freighter prompts and wait for the confirmed transaction. The repairer then opens `/repairer` or `/passkey-spike` as appropriate.
 4. Open a passport link or QR code on a second device to check the public experience. Hosted links use the HTTPS Vercel origin; a localhost QR link is not reachable from another device.
 
-Test data and repair notes are public on Testnet. Do not put private information in them. A repairer only needs to share a **public `G...` address** to receive a role; never share a recovery phrase or private key.
+Test data and repair notes are public on Testnet. Do not put private information in them. A repairer only needs to share a **public `G...` or `C...` address** to receive a role; never share a recovery phrase or private key.
 
 ## Run locally
 
@@ -59,7 +59,8 @@ cp web/.env.example web/.env.local
 Set the following public value in `web/.env.local`, then start Vite:
 
 ```dotenv
-VITE_STELLAR_CONTRACT_ID=CCHXDDGMOZNABGIYGBOIWCFHD3RECIKI2UWJKMOGRBCSSIL6YACCX6WJ
+VITE_STELLAR_CONTRACT_ID=CBR76DY4ZIRCB2CK5A2V7CC4I4UF7SQ5ULUHT6HMP4ZWN3R32BWAOIQP
+VITE_FIVE_DIGIT_IDS=true
 ```
 
 ```sh
@@ -78,7 +79,7 @@ npm run test:fee-bump
 npm run build
 ```
 
-The latest local checks passed: **39 browser tests** and **13 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
+The latest local checks passed: **39 browser tests** and **14 contract tests**. Contract checks use Rust 1.99.1, the `wasm32v1-none` target, and Stellar CLI 28.1.0:
 
 ```sh
 cargo fmt --manifest-path stellar/Cargo.toml --check
@@ -86,7 +87,7 @@ cargo test --manifest-path stellar/Cargo.toml --locked
 stellar contract build --manifest-path stellar/Cargo.toml --package redevice-stellar --locked
 ```
 
-Vercel builds from the repository root with [vercel.json](vercel.json). The personal Vercel project's production `VITE_STELLAR_CONTRACT_ID` points to the current sequential-ID contract. The [ignore file](.vercelignore) excludes local environment files and contract build artifacts. The optional `/deploy` page handles a reviewed WASM upload, fee-bump signing, instance deployment, and a Repairer role grant. The five digit WASM is already uploaded: use **Check existing upload** before any repeat upload. Set `VITE_FIVE_DIGIT_IDS=true` only when production points to the new contract.
+Vercel builds from the repository root with [vercel.json](vercel.json). The canonical `redevice-six.vercel.app` alias points to the latest Preview deployment. Its `VITE_STELLAR_CONTRACT_ID` and server-only `PASSKEY_REDEVICE_CONTRACT_ID` point to the corrected five-digit contract, with `VITE_FIVE_DIGIT_IDS=true`. The [ignore file](.vercelignore) excludes local environment files and contract build artifacts. The optional `/deploy` page handles a reviewed WASM upload, fee-bump signing, instance deployment, and a Repairer role grant. The corrected WASM is also available from the page's download link.
 
 ## Remaining work
 
@@ -97,4 +98,4 @@ Vercel builds from the repository root with [vercel.json](vercel.json). The pers
 
 See [the Stellar integration plan](docs/stellar_integration.md) for the schema, test gates, and remaining migration details. The earlier Sui prototype remains in Git history; its records are not presented as Stellar records.
 
-The passkey feasibility harness is documented in the [passkey-sponsored actions roadmap](docs/passkey_sponsored_actions.md), with [Vercel Preview setup](docs/passkey_vercel_preview.md). Its real Testnet passkey transaction and reusable layer still require proof.
+The passkey feasibility harness is documented in the [passkey-sponsored actions roadmap](docs/passkey_sponsored_actions.md), with [Vercel Preview setup](docs/passkey_vercel_preview.md). A tester completed account creation, administrator grant, sponsored repair, and passport readback on the earlier sequential-ID contract; transaction hashes remain to be recorded. The reusable layer is still future work.

@@ -1,11 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
+// Vite resolves this import to the passkey kit's Stellar SDK for XDR compatibility.
 import { contract } from "@stellar/stellar-sdk";
 import { IndexedDBStorage, SmartAccountKit } from "smart-account-kit";
 import {
   CONTRACT_ID,
+  FIVE_DIGIT_IDS,
   getAdministrator,
   getDevice,
   getRepairs,
+  hasRole,
   NETWORK,
   RPC_URL,
   transactionExplorerUrl,
@@ -38,7 +41,7 @@ const message = (error: unknown) =>
 
 export default function PasskeySpike() {
   const [account, setAccount] = useState("");
-  const [deviceId, setDeviceId] = useState("1");
+  const [deviceId, setDeviceId] = useState(FIVE_DIGIT_IDS ? "" : "1");
   const [repairType, setRepairType] = useState("Screen replacement");
   const [notes, setNotes] = useState("Testnet passkey repair attestation");
   const [status, setStatus] = useState<Status>("Repaired");
@@ -105,6 +108,10 @@ export default function PasskeySpike() {
     event.preventDefault();
     if (!account || busy) return;
     await run(async () => {
+      if (!(await hasRole("Repairer", account)))
+        throw new Error(
+          `Passkey account ${account} does not have Repairer access on this contract. Ask the administrator to grant this exact C-address at /admin, then retry.`,
+        );
       const device = await getDevice(deviceId);
       if (!device) throw new Error(`Device ${deviceId} was not found.`);
       if (
@@ -222,6 +229,8 @@ export default function PasskeySpike() {
       <form onSubmit={(event) => void attest(event)} className="grid gap-3">
         <input
           aria-label="Device ID"
+          placeholder={FIVE_DIGIT_IDS ? "Five digit device ID" : "Device ID"}
+          inputMode="numeric"
           value={deviceId}
           onChange={(event) => setDeviceId(event.target.value)}
           className="rounded-xl border border-line p-3"

@@ -17,3 +17,4 @@ stellar/**/test_snapshots/
 # Local agent tooling and downloaded skills
 .agents/
 skills-lock.json
+.taste-skill/

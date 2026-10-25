@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ShieldCheck, UserRoundCheck, UserRoundX, Wallet } from "lucide-react";
+import AppShell from "./components/AppShell";
 import {
   changeRepairerRole,
   CONTRACT_ID,
@@ -110,59 +111,50 @@ export default function Admin() {
   const checked = checkedAccount === account.trim();
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 p-5">
-          <a href="/" className="text-2xl font-bold">
-            ReDevice
-          </a>
-          <nav className="flex items-center gap-4 text-sm">
-            <a href="/" className="text-muted hover:text-ink">
-              Passports
-            </a>
-            <span className="font-semibold text-brand">Admin</span>
-          </nav>
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand">
-            Stellar Testnet
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto grid max-w-6xl gap-6 p-5 py-8">
+    <AppShell active="admin">
+      <div className="rd-content">
         {!isAdmin ? (
-          <section className="mx-auto w-full max-w-xl rounded-2xl border border-line bg-surface p-8 text-center">
-            <ShieldCheck className="mx-auto text-brand" size={36} />
-            <h1 className="mt-4 text-2xl font-semibold">
-              Admin access required
-            </h1>
-            <p className="mt-3 text-muted" role="status">
-              {checking || (!administrator && configured && !error)
-                ? "Checking your Freighter account…"
-                : wallet
-                  ? "This wallet is not the contract administrator. Select the administrator account in Freighter to continue."
-                  : "Connect the contract administrator account in Freighter to continue."}
-            </p>
-            {error && (
-              <p role="alert" className="mt-4 text-sm text-amber-900">
-                {error}
+          <section className="rd-panel grid items-start gap-8 p-7 sm:p-9 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)]">
+            <div>
+              <ShieldCheck className="text-brand" size={28} />
+              <h1 className="rd-page-title mt-5">Admin access required</h1>
+              <p className="mt-3 max-w-xl text-muted" role="status">
+                {checking || (!administrator && configured && !error)
+                  ? "Checking your Freighter account…"
+                  : wallet
+                    ? "This wallet is not the contract administrator. Select the administrator account in Freighter to continue."
+                    : "Connect the contract administrator account in Freighter to continue."}
               </p>
-            )}
-            <button
-              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
-              disabled={!configured || busy}
-              onClick={() => void connect()}
-            >
-              <Wallet size={18} /> Connect Freighter
-            </button>
+              {error && (
+                <p role="alert" className="mt-4 text-sm text-amber-900">
+                  {error}
+                </p>
+              )}
+              <button
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-3 text-white disabled:opacity-50"
+                disabled={!configured || busy}
+                onClick={() => void connect()}
+              >
+                <Wallet size={18} /> Connect Freighter
+              </button>
+            </div>
+            <div className="border-t border-line pt-6 text-sm lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+              <h2 className="rd-panel-heading">What admins manage</h2>
+              <p className="mt-3 text-muted">
+                Grant or revoke Repairer access for a public Testnet wallet or
+                passkey account.
+              </p>
+              <p className="mt-4 text-muted">
+                Only the contract administrator can approve a role change. Every
+                change requires a Freighter signature.
+              </p>
+            </div>
           </section>
         ) : (
           <>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-brand">
-                  Administrator workspace
-                </p>
-                <h1 className="mt-2 text-4xl font-semibold">Repairer access</h1>
+                <h1 className="rd-page-title">Repairer access</h1>
                 <p className="mt-2 max-w-2xl text-muted">
                   Authorize real repairers to add service attestations to device
                   passports. Every change is recorded on Stellar Testnet.
@@ -207,8 +199,8 @@ export default function Admin() {
               </a>
             )}
 
-            <section className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-surface p-5">
+            <section className="order-3 grid items-start gap-4 sm:grid-cols-2">
+              <div className="rd-panel p-5">
                 <div className="flex items-center gap-2 text-brand">
                   <ShieldCheck size={20} />
                   <h2 className="font-semibold">Contract administrator</h2>
@@ -224,7 +216,7 @@ export default function Admin() {
                       : "Connect this wallet to manage access."}
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-surface p-5">
+              <div className="rd-panel p-5">
                 <h2 className="font-semibold">Contract</h2>
                 <p className="mt-3 break-all font-mono text-sm">
                   {CONTRACT_ID || "Not configured"}
@@ -236,10 +228,10 @@ export default function Admin() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-line bg-surface p-5">
+            <section className="rd-panel order-2 p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-2xl font-semibold">Manage an account</h2>
+                  <h2 className="rd-panel-heading">Manage an account</h2>
                   <p className="mt-1 text-sm text-muted">
                     Enter the repairer's public Testnet address (G… wallet or C…
                     passkey account).
@@ -307,7 +299,7 @@ export default function Admin() {
             </section>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

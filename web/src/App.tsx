@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
+import { ScanLine } from "lucide-react";
+import AppShell from "./components/AppShell";
 import { createPassportPdf } from "./lib/passport-pdf";
 import {
   attestRepair,
   CONTRACT_ID,
   deviceExplorerUrl,
   FIVE_DIGIT_IDS,
-  getAdministrator,
   getDevice,
   getRepairs,
   hasRole,
@@ -36,13 +37,15 @@ function Scanner({ onScan }: { onScan: (id: string) => void }) {
   const stream = useRef<MediaStream | null>(null);
   const frame = useRef<number | null>(null);
   const [error, setError] = useState("");
-  function stop() {
+  const [active, setActive] = useState(false);
+  function stop(updateState = true) {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     frame.current = null;
+    if (updateState) setActive(false);
   }
-  useEffect(() => stop, []);
+  useEffect(() => () => stop(false), []);
   async function start() {
     setError("");
     try {
@@ -54,6 +57,7 @@ function Scanner({ onScan }: { onScan: (id: string) => void }) {
         return;
       }
       video.current.srcObject = stream.current;
+      setActive(true);
       await video.current.play();
       const canvas = document.createElement("canvas");
       const scan = () => {
@@ -107,27 +111,41 @@ function Scanner({ onScan }: { onScan: (id: string) => void }) {
     }
   }
   return (
-    <section className="rounded-2xl border border-line bg-surface p-5">
-      <h2 className="text-xl font-semibold">Scan passport QR</h2>
-      <video
-        ref={video}
-        muted
-        playsInline
-        className="mt-3 max-h-64 w-full rounded-xl bg-ink"
-      />
+    <section className="rd-panel self-start p-5">
+      <h2 className="rd-panel-heading">Scan passport QR</h2>
+      <p className="mt-1 text-sm text-muted">
+        Use a camera to open a printed or shared passport.
+      </p>
+      <div className="rd-scanner-view mt-4">
+        {!active && (
+          <div className="rd-scanner-standby">
+            <ScanLine size={28} strokeWidth={1.4} aria-hidden="true" />
+            <span>Camera preview starts here</span>
+          </div>
+        )}
+        <video
+          ref={video}
+          muted
+          playsInline
+          className={active ? "max-h-64 w-full rounded-lg" : "sr-only"}
+        />
+      </div>
       <div className="mt-3 flex gap-2">
-        <button
-          className="rounded-xl bg-ink px-4 py-2 text-white"
-          onClick={() => void start()}
-        >
-          Open camera
-        </button>
-        <button
-          className="rounded-xl border border-line px-4 py-2"
-          onClick={stop}
-        >
-          Stop
-        </button>
+        {!active ? (
+          <button
+            className="rounded-lg border border-line px-4 py-2 font-semibold"
+            onClick={() => void start()}
+          >
+            Open camera
+          </button>
+        ) : (
+          <button
+            className="rounded-lg border border-line px-4 py-2 font-semibold"
+            onClick={() => stop()}
+          >
+            Stop camera
+          </button>
+        )}
       </div>
       {error && (
         <p role="alert" className="mt-3 text-sm text-amber-800">
@@ -166,11 +184,14 @@ function PassportQr({ id, device }: { id: string; device: Device }) {
     pdf.save(`ReDevice-${id}.pdf`);
   }
   return (
-    <div className="rounded-2xl border border-line bg-surface p-5">
-      <h3 className="font-semibold">Public passport QR</h3>
+    <div className="rd-panel self-start p-5">
+      <h3 className="rd-panel-heading">Share this passport</h3>
+      <p className="mt-1 text-sm text-muted">
+        Anyone with the link can read this public record.
+      </p>
       {qr && (
         <img
-          className="mt-3 w-44 rounded-lg"
+          className="mt-4 w-44 rounded-lg border border-line p-2"
           src={qr}
           alt={`QR for device ${id}`}
         />
@@ -199,7 +220,6 @@ function App({ view = "auto" }: { view?: View }) {
   const { wallet, connect: connectFreighter } = useWallet();
   const [repairer, setRepairer] = useState(false);
   const [roleChecked, setRoleChecked] = useState(false);
-  const [administrator, setAdministrator] = useState("");
   const [lookup, setLookup] = useState("");
   const [id, setId] = useState<string | null>(null);
   const [device, setDevice] = useState<Device | null>(null);
@@ -263,18 +283,6 @@ function App({ view = "auto" }: { view?: View }) {
     }
     // Only the initial route is loaded here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void getAdministrator()
-      .then((admin) => {
-        if (active) setAdministrator(admin);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
   }, []);
 
   useEffect(() => {
@@ -398,70 +406,64 @@ function App({ view = "auto" }: { view?: View }) {
   const showRepair = repairer && view !== "register";
   const transactionHash = `${notice} ${error}`.match(/[0-9a-f]{64}/i)?.[0];
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 p-5">
-          <a href="/" className="text-2xl font-bold">
-            ReDevice
-          </a>
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand">
-            Stellar Testnet
-          </span>
-          <nav className="flex items-center gap-3 text-sm font-semibold">
-            <a
-              href="/register"
-              className={
-                view === "register" ? "text-brand" : "text-muted hover:text-ink"
-              }
-            >
-              Register
-            </a>
-            <a
-              href="/repairer"
-              className={
-                view === "repairer" ? "text-brand" : "text-muted hover:text-ink"
-              }
-            >
-              Repairer
-            </a>
-          </nav>
-          {wallet && wallet === administrator && (
-            <a
-              href="/admin"
-              className="text-sm font-semibold text-brand underline"
-            >
-              Admin
-            </a>
-          )}
-          <button
-            className="rounded-xl bg-ink px-4 py-2 text-white"
-            disabled={!configured || busy}
-            onClick={() => void connect()}
-          >
-            {wallet
-              ? `${wallet.slice(0, 6)}…${wallet.slice(-4)} · refresh wallet`
-              : "Connect Freighter"}
-          </button>
-        </div>
-      </header>
-      <main className="mx-auto grid max-w-6xl gap-6 p-5 py-8">
+    <AppShell
+      active={
+        view === "register"
+          ? "register"
+          : view === "repairer"
+            ? "repairer"
+            : "passports"
+      }
+      action={
+        <button
+          className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          disabled={!configured || busy}
+          onClick={() => void connect()}
+        >
+          {wallet
+            ? `${wallet.slice(0, 6)}…${wallet.slice(-4)} · refresh wallet`
+            : "Connect Freighter"}
+        </button>
+      }
+    >
+      <div className="rd-content">
         <div>
-          <h1 className="text-4xl font-semibold">
-            Verifiable device passports
+          <h1 className="rd-page-title">
+            {device
+              ? "Device passport"
+              : view === "register"
+                ? "New device record"
+                : view === "repairer"
+                  ? "Repair workspace"
+                  : "Device passports"}
           </h1>
-          <p className="mt-2 text-muted">
-            Public records on Stellar Testnet. Registration needs a connected
-            wallet; repairs require an authorized repairer.
+          <p className="rd-page-summary">
+            {device
+              ? `Record ${id} · service history and registration details from Stellar Testnet.`
+              : view === "register"
+                ? "Create a signed record for a device, then share its public passport."
+                : view === "repairer"
+                  ? "Choose a passkey or an authorized Freighter wallet to record a repair."
+                  : "Look up a device and read its repair history without connecting a wallet."}
           </p>
         </div>
         {view === "repairer" &&
           import.meta.env.VITE_PASSKEY_TESTING === "true" && (
-            <a
-              href="/passkey-spike"
-              className="w-fit rounded-xl bg-ink px-4 py-3 font-semibold text-white"
-            >
-              Continue with passkey
-            </a>
+            <section className="rd-repair-entry">
+              <div>
+                <h2 className="rd-panel-heading">Repair with a passkey</h2>
+                <p className="mt-1 text-sm text-muted">
+                  Approve an attestation on this device. The test sponsor pays
+                  the network fee.
+                </p>
+              </div>
+              <a
+                href="/passkey-spike"
+                className="inline-flex min-h-11 items-center justify-center rounded-lg bg-ink px-5 py-2 text-sm font-semibold text-white"
+              >
+                Continue with passkey
+              </a>
+            </section>
           )}
         {view === "repairer" && !showRepair && (
           <p
@@ -470,7 +472,7 @@ function App({ view = "auto" }: { view?: View }) {
           >
             {wallet && !roleChecked
               ? "Checking Repairer authorization…"
-              : "Repairer access is required for attestations. You can still find passports and register devices here."}
+              : "Repairer access is required for attestations. Use a passkey above or connect an authorized Freighter wallet."}
           </p>
         )}
         {!configured && (
@@ -498,31 +500,34 @@ function App({ view = "auto" }: { view?: View }) {
             {notice}
           </p>
         )}
-        <section className="grid gap-5 md:grid-cols-2">
+        <section
+          className={`grid items-start gap-5 lg:grid-cols-2 ${view === "register" ? "order-4" : "order-3"}`}
+        >
           <form
-            className="rounded-2xl border border-line bg-surface p-5"
+            className="rd-panel p-5"
             onSubmit={(event) => {
               event.preventDefault();
               void load(lookup);
             }}
           >
-            <h2 className="text-xl font-semibold">Find a passport</h2>
+            <h2 className="rd-panel-heading">Find a passport</h2>
             <p className="mt-1 text-sm text-muted">
               Anyone can read by device ID. No wallet needed.
             </p>
-            <input
-              className="mt-4 w-full rounded-xl border border-line p-3"
-              inputMode="numeric"
-              placeholder={
-                FIVE_DIGIT_IDS ? "Five digit device ID" : "Device ID, e.g. 1"
-              }
-              maxLength={FIVE_DIGIT_IDS ? 5 : 20}
-              value={lookup}
-              onChange={(event) => setLookup(event.target.value)}
-            />
+            <label className="rd-field mt-4">
+              Device ID
+              <input
+                className="w-full border p-3"
+                inputMode="numeric"
+                placeholder={FIVE_DIGIT_IDS ? "Five digit ID" : "ID, e.g. 1"}
+                maxLength={FIVE_DIGIT_IDS ? 5 : 20}
+                value={lookup}
+                onChange={(event) => setLookup(event.target.value)}
+              />
+            </label>
             <button
               disabled={!configured || busy}
-              className="mt-3 rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
+              className="mt-4 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               Read from Testnet
             </button>
@@ -530,15 +535,15 @@ function App({ view = "auto" }: { view?: View }) {
           <Scanner onScan={(nextId) => void load(nextId)} />
         </section>
         {device && id && (
-          <section className="grid gap-5 lg:grid-cols-[1fr_17rem]">
-            <div className="rounded-2xl border border-line bg-surface p-5">
-              <p className="text-xs font-semibold uppercase tracking-widest text-success">
+          <section className="order-2 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_250px]">
+            <div className="rd-panel rd-passport-record p-6">
+              <p className="text-sm font-semibold text-brand">
                 Live Stellar Testnet · device {id}
               </p>
-              <h2 className="mt-2 text-3xl font-semibold">
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">
                 {device.brand} {device.model}
               </h2>
-              <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <dl className="rd-passport-facts mt-6 grid gap-5 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-muted">Condition</dt>
                   <dd className="font-semibold">{label(device.status.tag)}</dd>
@@ -582,7 +587,7 @@ function App({ view = "auto" }: { view?: View }) {
               >
                 Open contract in Stellar Expert
               </a>
-              <h3 className="mt-7 text-xl font-semibold">
+              <h3 className="mt-8 border-t border-line pt-6 text-lg font-semibold">
                 Repair history ({device.repair_count})
               </h3>
               {repairs.length === 0 && (
@@ -590,12 +595,9 @@ function App({ view = "auto" }: { view?: View }) {
                   No attested repairs yet.
                 </p>
               )}
-              <ol className="mt-3 grid gap-3">
+              <ol className="rd-repair-history mt-4 grid gap-4">
                 {[...repairs].reverse().map((record) => (
-                  <li
-                    key={record.index}
-                    className="rounded-xl border border-line p-4"
-                  >
+                  <li key={record.index} className="pl-5">
                     <p className="font-semibold">
                       {record.repair_type} · {label(record.previous_status.tag)}{" "}
                       → {label(record.next_status.tag)}
@@ -622,146 +624,198 @@ function App({ view = "auto" }: { view?: View }) {
           </section>
         )}
         <section
-          className={`grid gap-5 ${showRepair ? "lg:grid-cols-2" : "max-w-xl"}`}
+          className={`grid items-start gap-5 ${view === "register" ? "order-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(240px,0.6fr)]" : "order-4"} ${showRepair ? "lg:grid-cols-2" : ""}`}
         >
           <form
             onSubmit={(event) => void submitRegistration(event)}
-            className="grid content-start gap-3 rounded-2xl border border-line bg-surface p-5"
+            className="rd-panel grid content-start gap-4 p-6 sm:grid-cols-2"
           >
-            <h2 className="text-xl font-semibold">Register a device</h2>
-            <p className="text-sm text-muted">
+            <h2 className="rd-panel-heading sm:col-span-2">
+              Register a device
+            </h2>
+            <p className="text-sm text-muted sm:col-span-2">
               Connect a Testnet wallet to register. The full serial stays in
               this browser; its hash and an automatically masked serial are sent
               on-chain. Registration is a wallet-signed claim, not independent
               proof of ownership.
             </p>
             {!wallet && (
-              <p className="text-sm text-amber-800">
+              <p className="text-sm text-amber-800 sm:col-span-2">
                 Connect Freighter to register a device.
               </p>
             )}
-            <input
-              required
-              maxLength={64}
-              className="rounded-xl border border-line p-3"
-              placeholder="Manufacturer namespace, e.g. apple"
-              value={manufacturer}
-              onChange={(event) => setManufacturer(event.target.value)}
-            />
-            <input
-              required
-              maxLength={64}
-              className="rounded-xl border border-line p-3"
-              placeholder="Product namespace, e.g. macbook-air-m3"
-              value={product}
-              onChange={(event) => setProduct(event.target.value)}
-            />
-            <input
-              required
-              maxLength={128}
-              className="rounded-xl border border-line p-3"
-              placeholder="Full serial (never published)"
-              value={serial}
-              onChange={(event) => setSerial(event.target.value)}
-            />
-            <input
-              required
-              maxLength={64}
-              className="rounded-xl border border-line p-3"
-              placeholder="Brand"
-              value={brand}
-              onChange={(event) => setBrand(event.target.value)}
-            />
-            <input
-              required
-              maxLength={64}
-              className="rounded-xl border border-line p-3"
-              placeholder="Model"
-              value={model}
-              onChange={(event) => setModel(event.target.value)}
-            />
-            <select
-              className="rounded-xl border border-line p-3"
-              value={initialStatus}
-              onChange={(event) =>
-                setInitialStatus(event.target.value as "Used" | "Refurbished")
-              }
-            >
-              <option>Used</option>
-              <option>Refurbished</option>
-            </select>
+            <label className="rd-field">
+              Manufacturer namespace
+              <input
+                required
+                maxLength={64}
+                className="border p-3"
+                placeholder="e.g. apple"
+                value={manufacturer}
+                onChange={(event) => setManufacturer(event.target.value)}
+              />
+            </label>
+            <label className="rd-field">
+              Product namespace
+              <input
+                required
+                maxLength={64}
+                className="border p-3"
+                placeholder="e.g. macbook-air-m3"
+                value={product}
+                onChange={(event) => setProduct(event.target.value)}
+              />
+            </label>
+            <label className="rd-field sm:col-span-2">
+              Full serial{" "}
+              <span className="font-normal text-muted">(never published)</span>
+              <input
+                required
+                maxLength={128}
+                className="border p-3"
+                placeholder="Enter the serial on the device"
+                value={serial}
+                onChange={(event) => setSerial(event.target.value)}
+              />
+            </label>
+            <label className="rd-field">
+              Brand
+              <input
+                required
+                maxLength={64}
+                className="border p-3"
+                placeholder="e.g. Apple"
+                value={brand}
+                onChange={(event) => setBrand(event.target.value)}
+              />
+            </label>
+            <label className="rd-field">
+              Model
+              <input
+                required
+                maxLength={64}
+                className="border p-3"
+                placeholder="e.g. MacBook Air M3"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+              />
+            </label>
+            <label className="rd-field sm:col-span-2">
+              Initial condition
+              <select
+                className="border p-3"
+                value={initialStatus}
+                onChange={(event) =>
+                  setInitialStatus(event.target.value as "Used" | "Refurbished")
+                }
+              >
+                <option>Used</option>
+                <option>Refurbished</option>
+              </select>
+            </label>
             <button
               disabled={!configured || !wallet || busy}
-              className="rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
+              className="w-fit rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2"
             >
               Register on Stellar
             </button>
           </form>
+          {view === "register" && (
+            <aside className="rd-panel self-start p-6">
+              <h2 className="rd-panel-heading">On the public record</h2>
+              <p className="mt-2 text-sm text-muted">
+                A registration creates a permanent Testnet passport with:
+              </p>
+              <ul className="rd-fact-list mt-5 text-sm">
+                <li>A random five digit device ID</li>
+                <li>Brand, model and initial condition</li>
+                <li>A masked serial and serial commitment</li>
+                <li>The registering account and ledger time</li>
+              </ul>
+              <p className="mt-5 border-t border-line pt-4 text-xs text-muted">
+                The full serial stays in this browser. Repair notes added later
+                are public.
+              </p>
+            </aside>
+          )}
           {showRepair && (
             <form
               onSubmit={(event) => void submitRepair(event)}
-              className="grid content-start gap-3 rounded-2xl border border-line bg-surface p-5"
+              className="rd-panel grid content-start gap-4 p-6"
             >
-              <h2 className="text-xl font-semibold">Attest a repair</h2>
+              <h2 className="rd-panel-heading">Attest a repair</h2>
               <p className="text-sm text-muted">
-                Repairer role and a loaded live device required. Notes are
-                public on-chain.
+                Load a device passport, then add a signed service record. Notes
+                are public on-chain.
               </p>
               {wallet && !repairer && (
                 <p className="text-sm text-amber-800">
                   This account has no Repairer role.
                 </p>
               )}
-              <input
-                required
-                maxLength={64}
-                className="rounded-xl border border-line p-3"
-                placeholder="Repair type"
-                value={repairType}
-                onChange={(event) => setRepairType(event.target.value)}
-              />
-              <textarea
-                required
-                maxLength={500}
-                className="min-h-28 rounded-xl border border-line p-3"
-                placeholder="Public service notes"
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-              />
-              <select
-                className="rounded-xl border border-line p-3"
-                value={nextStatus}
-                onChange={(event) =>
-                  setNextStatus(event.target.value as Status)
-                }
-              >
-                {conditions.map((condition) => (
-                  <option key={condition} value={condition}>
-                    {label(condition)}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                className="rounded-xl border border-line p-3"
-                placeholder="Battery health % (optional)"
-                value={battery}
-                onChange={(event) => setBattery(event.target.value)}
-              />
-              <label className="text-xs text-muted">
+              <label className="rd-field">
+                Repair type
+                <input
+                  required
+                  maxLength={64}
+                  className="border p-3"
+                  placeholder="e.g. Screen replacement"
+                  value={repairType}
+                  onChange={(event) => setRepairType(event.target.value)}
+                />
+              </label>
+              <label className="rd-field">
+                Public service notes
+                <textarea
+                  required
+                  maxLength={500}
+                  className="min-h-28 border p-3"
+                  placeholder="Describe the work performed"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                />
+              </label>
+              <label className="rd-field">
+                New condition
+                <select
+                  className="border p-3"
+                  value={nextStatus}
+                  onChange={(event) =>
+                    setNextStatus(event.target.value as Status)
+                  }
+                >
+                  {conditions.map((condition) => (
+                    <option key={condition} value={condition}>
+                      {label(condition)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="rd-field">
+                Battery health %{" "}
+                <span className="font-normal text-muted">(optional)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  className="border p-3"
+                  placeholder="0–100"
+                  value={battery}
+                  onChange={(event) => setBattery(event.target.value)}
+                />
+              </label>
+              <label className="rd-field">
                 Claimed service time (optional)
                 <input
                   type="datetime-local"
-                  className="mt-1 w-full rounded-xl border border-line p-3"
+                  className="border p-3"
                   value={serviceDate}
                   onChange={(event) => setServiceDate(event.target.value)}
                 />
               </label>
               <button
                 disabled={!configured || !repairer || !device || busy}
-                className="rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
+                className="w-fit rounded-lg bg-ink px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Attest on Stellar
               </button>
@@ -778,8 +832,8 @@ function App({ view = "auto" }: { view?: View }) {
             Open confirmed transaction
           </a>
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 

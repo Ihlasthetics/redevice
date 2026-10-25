@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 // Vite resolves this import to the passkey kit's Stellar SDK for XDR compatibility.
 import { contract } from "@stellar/stellar-sdk";
 import { IndexedDBStorage, SmartAccountKit } from "smart-account-kit";
+import AppShell from "./components/AppShell";
 import {
   CONTRACT_ID,
   FIVE_DIGIT_IDS,
@@ -171,109 +172,161 @@ export default function PasskeySpike() {
   }
 
   return (
-    <main className="mx-auto max-w-xl space-y-5 p-6 text-ink">
-      <h1 className="text-2xl font-bold">Passkey feasibility test</h1>
-      <p className="text-sm text-muted">
-        Testnet feasibility test. The sponsor can create one account or submit
-        one repair per run. Keep this browser open until the transaction
-        finishes.
-      </p>
-      {!testUnlocked && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void run(unlockTest);
-          }}
-          className="flex gap-3"
-        >
-          <input
-            aria-label="Test access token"
-            type="password"
-            autoComplete="off"
-            value={testToken}
-            onChange={(event) => setTestToken(event.target.value)}
-            className="min-w-0 flex-1 rounded-xl border border-line p-3"
-            placeholder="Test access token"
-          />
-          <button
-            disabled={busy || !testToken}
-            className="rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
+    <AppShell active="passkey">
+      <div className="rd-content">
+        <div>
+          <h1 className="rd-page-title">Passkey repair</h1>
+          <p className="rd-page-summary">
+            Authorize a public service record with a passkey. Keep this page
+            open until Testnet confirms it.
+          </p>
+        </div>
+        {notice && (
+          <p role="status" className="rd-panel break-all p-4 text-sm">
+            {notice}
+          </p>
+        )}
+        {hash && (
+          <a
+            className="text-sm font-semibold text-brand underline"
+            href={transactionExplorerUrl(hash)}
+            target="_blank"
+            rel="noreferrer"
           >
-            Unlock test
-          </button>
-        </form>
-      )}
-      <p className="break-all rounded-xl border border-line p-3 text-sm">
-        Passkey account: {account || "not connected"}
-      </p>
-      <div className="flex gap-3">
-        <button
-          disabled={busy || !testUnlocked}
-          onClick={() => void run(createAccount)}
-          className="rounded-xl bg-ink px-4 py-2 text-white disabled:opacity-50"
-        >
-          Create passkey account
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => void run(connectAccount)}
-          className="rounded-xl border border-line px-4 py-2 disabled:opacity-50"
-        >
-          Reconnect
-        </button>
+            View Testnet transaction
+          </a>
+        )}
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+          <div className="grid gap-5">
+            <section className="rd-panel p-6">
+              <h2 className="rd-panel-heading">1. Connect your passkey</h2>
+              <p className="mt-2 text-sm text-muted">
+                The same browser and website address are needed to reconnect an
+                existing account.
+              </p>
+              {!testUnlocked && (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void run(unlockTest);
+                  }}
+                  className="mt-5 flex flex-wrap items-end gap-3"
+                >
+                  <label className="rd-field min-w-48 flex-1">
+                    Test access token
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={testToken}
+                      onChange={(event) => setTestToken(event.target.value)}
+                      className="border p-3"
+                      placeholder="Enter test token"
+                    />
+                  </label>
+                  <button
+                    disabled={busy || !testToken}
+                    className="min-h-11 rounded-lg bg-ink px-4 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Unlock test
+                  </button>
+                </form>
+              )}
+              <div className="mt-5 border-t border-line pt-4">
+                <p className="text-xs text-muted">Passkey account</p>
+                <p className="mt-1 break-all font-mono text-sm font-semibold">
+                  {account || "Not connected"}
+                </p>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  disabled={busy || !testUnlocked}
+                  onClick={() => void run(createAccount)}
+                  className="min-h-11 rounded-lg bg-ink px-4 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  Create passkey account
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => void run(connectAccount)}
+                  className="min-h-11 rounded-lg border border-line px-4 text-sm font-semibold disabled:opacity-50"
+                >
+                  Reconnect
+                </button>
+              </div>
+            </section>
+            <section className="rd-panel p-6">
+              <h2 className="rd-panel-heading">2. Get Repairer access</h2>
+              <p className="mt-2 text-sm text-muted">
+                Share the exact C-address above with the administrator. They
+                grant it Repairer access on this contract.
+              </p>
+              <a
+                href="/admin"
+                className="mt-4 inline-block text-sm font-semibold text-brand underline"
+              >
+                Open access control
+              </a>
+            </section>
+          </div>
+          <form
+            onSubmit={(event) => void attest(event)}
+            className="rd-panel grid gap-4 p-6"
+          >
+            <div>
+              <h2 className="rd-panel-heading">3. Attest a repair</h2>
+              <p className="mt-2 text-sm text-muted">
+                Confirm the device and details. Repair notes will be public.
+              </p>
+            </div>
+            <label className="rd-field">
+              Device ID
+              <input
+                placeholder={
+                  FIVE_DIGIT_IDS ? "Five digit device ID" : "Device ID"
+                }
+                inputMode="numeric"
+                value={deviceId}
+                onChange={(event) => setDeviceId(event.target.value)}
+                className="border p-3"
+              />
+            </label>
+            <label className="rd-field">
+              Repair type
+              <input
+                value={repairType}
+                onChange={(event) => setRepairType(event.target.value)}
+                className="border p-3"
+              />
+            </label>
+            <label className="rd-field">
+              Public repair notes
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                className="min-h-28 border p-3"
+              />
+            </label>
+            <label className="rd-field">
+              New condition
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value as Status)}
+                className="border p-3"
+              >
+                <option>Repaired</option>
+                <option>Refurbished</option>
+                <option>PartsOnly</option>
+              </select>
+            </label>
+            <button
+              disabled={busy || !account || !testUnlocked}
+              className="min-h-11 rounded-lg bg-ink px-5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Approve repair with passkey
+            </button>
+          </form>
+        </div>
       </div>
-      <p className="text-sm">
-        After creation, the administrator grants this exact C-address Repairer
-        access on <a href="/admin">/admin</a> using Freighter.
-      </p>
-      <form onSubmit={(event) => void attest(event)} className="grid gap-3">
-        <input
-          aria-label="Device ID"
-          placeholder={FIVE_DIGIT_IDS ? "Five digit device ID" : "Device ID"}
-          inputMode="numeric"
-          value={deviceId}
-          onChange={(event) => setDeviceId(event.target.value)}
-          className="rounded-xl border border-line p-3"
-        />
-        <input
-          aria-label="Repair type"
-          value={repairType}
-          onChange={(event) => setRepairType(event.target.value)}
-          className="rounded-xl border border-line p-3"
-        />
-        <textarea
-          aria-label="Public repair notes"
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          className="rounded-xl border border-line p-3"
-        />
-        <select
-          aria-label="New status"
-          value={status}
-          onChange={(event) => setStatus(event.target.value as Status)}
-          className="rounded-xl border border-line p-3"
-        >
-          <option>Repaired</option>
-          <option>Refurbished</option>
-          <option>PartsOnly</option>
-        </select>
-        <button
-          disabled={busy || !account || !testUnlocked}
-          className="rounded-xl bg-ink px-4 py-3 text-white disabled:opacity-50"
-        >
-          Approve repair with passkey
-        </button>
-      </form>
-      {notice && (
-        <p role="status" className="break-all text-sm">
-          {notice}
-        </p>
-      )}
-      {hash && (
-        <a href={transactionExplorerUrl(hash)} target="_blank" rel="noreferrer">
-          View Testnet transaction
-        </a>
-      )}
-    </main>
+    </AppShell>
   );
 }

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 const mocks = vi.hoisted(() => ({
@@ -23,24 +23,30 @@ vi.mock("./stellar/client", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("VITE_PASSKEY_TESTING", "true");
   mocks.wallet = null;
   mocks.getAdministrator.mockResolvedValue("GADMIN");
   mocks.hasRole.mockResolvedValue(false);
   window.history.replaceState({}, "", "/");
 });
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe("registrar and repairer screens", () => {
-  it("shows only passport lookup and registration to a registrar", () => {
+  it("keeps registration on its own screen", () => {
     window.history.replaceState({}, "", "/register");
     render(<App view="register" />);
     expect(
-      screen.getByRole("heading", { name: "Find a passport" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Find a passport" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Register a device" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Attest a repair" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Scan passport QR" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByText(/Invalid Stellar passport link/),
@@ -56,20 +62,26 @@ describe("registrar and repairer screens", () => {
     );
     expect(screen.getByText(/Repairer access is required/)).toBeInTheDocument();
     expect(
+      screen.getByRole("heading", { name: "Repair with a passkey" }),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByRole("heading", { name: "Attest a repair" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Find a passport" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Find a passport" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Register a device" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Scan passport QR" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Register a device" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(/Invalid Stellar passport link/),
     ).not.toBeInTheDocument();
   });
 
-  it("gives an authorized repairer all three actions", async () => {
+  it("gives an authorized repairer lookup and attestation", async () => {
     mocks.wallet = "GREPAIRER";
     mocks.hasRole.mockResolvedValue(true);
     render(<App view="repairer" />);
@@ -82,8 +94,8 @@ describe("registrar and repairer screens", () => {
       screen.getByRole("heading", { name: "Find a passport" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Register a device" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Register a device" }),
+    ).not.toBeInTheDocument();
     mocks.hasRole.mockResolvedValue(false);
     fireEvent.focus(window);
     await waitFor(() =>
@@ -91,5 +103,18 @@ describe("registrar and repairer screens", () => {
         screen.queryByRole("heading", { name: "Attest a repair" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("keeps the passport screen focused on lookup", () => {
+    render(<App />);
+    expect(
+      screen.getByRole("heading", { name: "Find a passport" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Register a device" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Attest a repair" }),
+    ).not.toBeInTheDocument();
   });
 });

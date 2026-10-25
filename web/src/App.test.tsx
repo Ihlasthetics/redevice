@@ -13,13 +13,13 @@ vi.mock("@stellar/freighter-api", () => ({
 }));
 
 describe("Stellar browser without a deployment", () => {
-  it("shows the missing contract configuration and keeps writes disabled", () => {
+  it("shows the missing contract configuration and keeps passport reads disabled", () => {
     render(<App />);
     expect(
       screen.getByText(/Set VITE_STELLAR_CONTRACT_ID/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Register on Stellar" }),
+      screen.getByRole("button", { name: "Read from Testnet" }),
     ).toBeDisabled();
     expect(
       screen.queryByRole("button", { name: "Attest on Stellar" }),

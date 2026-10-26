@@ -2,7 +2,7 @@
   "name": "redevice",
   "private": true,
   "version": "0.0.0",
-  "description": "Verifiable repair histories for refurbished electronics on Stellar",
+  "description": "Passkey-approved, sponsored repair attestations on Stellar",
   "workspaces": [
     "web"
   ],
